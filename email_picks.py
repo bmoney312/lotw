@@ -15,7 +15,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def build_picks_html_row(rank, full_name, wins, losses, ats_points, pick, highlight_row):
+def build_picks_html_row(rank, full_name, wins, losses, ats_points, streak, pick, highlight_row):
     """
     Build picks email table row
     """
@@ -28,8 +28,9 @@ def build_picks_html_row(rank, full_name, wins, losses, ats_points, pick, highli
     <td><b>{}</b></td>
     <td><b>{}</b></td>
     <td><b>{}</b></td>
+    <td><b>{}</b></td>
 </tr>
-""".format(rank, full_name, wins, losses, ats_points, pick)
+""".format(rank, full_name, wins, losses, ats_points, streak, pick)
     else:
         table_row = """
 <tr>
@@ -39,8 +40,9 @@ def build_picks_html_row(rank, full_name, wins, losses, ats_points, pick, highli
     <td>{}</td>
     <td>{}</td>
     <td>{}</td>
+    <td>{}</td>
 </tr>
-""".format(rank, full_name, wins, losses, ats_points, pick)
+""".format(rank, full_name, wins, losses, ats_points, streak, pick)
 
     return table_row
 
@@ -126,13 +128,14 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
     <th>Wins</th>
     <th>Losses</th>
     <th>ATS Points</th>
+    <th>Streak</th>
     <th>Week {} Pick</th>
 </tr>
 """.format(week, week)
 
     rank = 1
     for row in standings:
-        (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points) = row
+        (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
         full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
 
         # highlight player's own pick
@@ -160,7 +163,7 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         else:
             rank_as_string = "{}".format(rank)
 
-        html += build_picks_html_row(rank_as_string, full_name, wins, losses, ats_points, pick_as_string, highlight_row)
+        html += build_picks_html_row(rank_as_string, full_name, wins, losses, ats_points, streak, pick_as_string, highlight_row)
         rank += 1
 
     # end for
