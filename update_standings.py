@@ -13,6 +13,50 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 
+def get_player_streak(conn, player_id, current_standings_week):
+    """
+    Calculate the player's current win/loss streak working backwards from the most recent week.
+    """
+    if current_standings_week == 0:
+        return "-" # Return '-' for week 0
+
+    try:
+        # get_all_player_picks returns list of (week, pick, pick_ats)
+        all_picks = get_all_player_picks(conn, player_id, current_standings_week)
+        # Create a map of week -> ats_result for picks that have been graded
+        # We only care about picks *up to* the current week that *have been graded*
+        picks_map = {week: ats for week, pick, ats in all_picks if ats is not None and week <= current_standings_week}
+
+        streak_count = 0
+        streak_type = None # 'W' or 'L'
+
+        # Iterate backwards from the most recent week
+        for week in range(current_standings_week, 0, -1):
+            ats_result = picks_map.get(week)
+
+            # A 'None' result means no pick was made for that week, which is a loss
+            current_result_type = 'W' if (ats_result is not None and ats_result > 0) else 'L'
+
+            if streak_type is None:
+                # This is the first week we're checking, it sets the streak type
+                streak_type = current_result_type
+                streak_count = 1
+            elif current_result_type == streak_type:
+                # The streak continues
+                streak_count += 1
+            else:
+                # The streak is broken
+                break
+
+        if streak_type is None:
+            return "-" # No graded picks found
+
+        return "{}{}".format(streak_type, streak_count) # e.g., "W3" or "L1"
+
+    except Exception as e:
+        logger.error("Error calculating streak for player {}: {}".format(player_id, str(e)))
+        return "?"
+
 def update_standings_table(conn, week):
     """
     Update Standings table based on picks thru and including week provided
@@ -71,15 +115,20 @@ def update_standings_table(conn, week):
 
         logger.info("Computed {} Ws / {} Ls / {} ATS / {} Win% for player {}".format(player_wins, player_losses, player_ats, player_win_percentage, player_id))
 
+        # --- Calculate Streak ---
+        streak_string = get_player_streak(conn, player_id, week)
+        logger.info("Computed streak {} for player {}".format(streak_string, player_id))
+        # --- End Streak Calculation ---
+
         # update Standings table
         try:
             with conn.cursor() as cur:
                 if new_standings_entry:
-                    sql = "INSERT INTO `Standings_" + str(get_current_year()) + "` (`player_id`, `wins`, `losses`, `win_percentage`, `ats_points`) VALUES (%s, %s, %s, %s, %s)"
-                    cur.execute(sql, (player_id, player_wins, player_losses, player_win_percentage, player_ats))
+                    sql = "INSERT INTO `Standings_" + str(get_current_year()) + "` (`player_id`, `wins`, `losses`, `win_percentage`, `ats_points`, `streak`) VALUES (%s, %s, %s, %s, %s, %s)"
+                    cur.execute(sql, (player_id, player_wins, player_losses, player_win_percentage, player_ats, streak_string))
                 else:
-                    sql = "UPDATE `Standings_" + str(get_current_year()) + "` SET `wins`=%s, `losses`=%s, `win_percentage`=%s, `ats_points`=%s WHERE `player_id` = %s"
-                    cur.execute(sql, (player_wins, player_losses, player_win_percentage, player_ats, player_id))
+                    sql = "UPDATE `Standings_" + str(get_current_year()) + "` SET `wins`=%s, `losses`=%s, `win_percentage`=%s, `ats_points`=%s, `streak`=%s WHERE `player_id` = %s"
+                    cur.execute(sql, (player_wins, player_losses, player_win_percentage, player_ats, streak_string, player_id))
 
                 logger.debug("update_standings_table(): ".format(sql))
                 conn.commit()
