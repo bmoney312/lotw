@@ -187,6 +187,18 @@ def lambda_handler(event, context):
     mail_port = os.environ['mail_port']
     mail_from = '"Brendan Connell" <bmoney312@lock-of-the-week.com>'
 
+    # --- Retry Configuration ---
+    try:
+        MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
+    except ValueError:
+        MAX_RETRIES = 5
+    
+    try:
+        RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
+    except ValueError:
+        RETRY_SLEEP_SECONDS = 15
+    # --- End Retry Configuration ---
+
     # determine current week
     week = os.environ.get('week')
     player_id = os.environ.get('player_id')
@@ -296,33 +308,44 @@ def lambda_handler(event, context):
         elif week == 22:
             mail_subject = "lotw: super bowl line"
 
-        email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
+        # --- Send email with retry logic ---
+        email_sent_successfully = False
+        for attempt in range(MAX_RETRIES):
+            email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
+            
+            if email_result is True:
+                logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
+                email_sent_successfully = True
+                break # Exit retry loop on success
+            else:
+                logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
+                if attempt < MAX_RETRIES - 1:
+                    logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
+                    smtp_relay.close()
+                    sleep(RETRY_SLEEP_SECONDS)
 
-        if email_result is True:
-            logger.info("Email sent successfully to player {} {}".format(player_id, player_email))
-        else:
-            logger.error("Email failed to player {} {}".format(player_id, player_email))
-            logger.info("Sleeping for 15 seconds before retry...")
-            smtp_relay.close()
-            sleep(15)
+                    # Reconnect to SMTP relay
+                    smtp_relay = None
+                    smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
-            # connect to SMTP relay
-            smtp_relay = None
-            smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
+                    if smtp_relay is None:
+                        logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
+                        break # Break retry loop if reconnect fails
+                else:
+                    logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
+
+        # If all retries failed, log and handle
+        if not email_sent_successfully:
+            logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
 
             if smtp_relay is None:
-                logger.error("Error establishing SMTP connection with {}".format(mail_host))
-                conn.close()
-                return response(200, 'text/html', build_html("Lines for week {} send failed for some players ({}).".format(week, player_id)))
+                 logger.error("SMTP connection is dead.")
 
-            email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
-            if email_result is True:
-                logger.info("Retry email sent successfully to player {} {}".format(player_id, player_email))
-            else:
-                logger.error("Retry email failed to player {} {}, exiting".format(player_id, player_email))
+            # Close connections and exit with 504 error as requested
+            conn.close()
+            if smtp_relay:
                 smtp_relay.close()
-                conn.close()
-                return response(504, 'text/html', build_html("Lines for week {} send failed for some players ({}).".format(week, player_id)))
+            return response(504, 'text/html', build_html("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
     # close database connection
     conn.close()
