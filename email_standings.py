@@ -38,6 +38,7 @@ def get_standings_html(conn, week, standings, current_player_id):
     <th>Losses</th>
     <th>Win %</th>
     <th>ATS Points</th>
+    <th>Streak</th>
     <th>Week {} Pick</th>
     <th>Week {} Result</th>
 </tr>
@@ -45,7 +46,7 @@ def get_standings_html(conn, week, standings, current_player_id):
 
     rank = 1
     for row in standings:
-        (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points) = row
+        (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
         full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
         (pick_id, pick, line, pick_ats, locked_in) = get_current_pick(conn, player_id, week)
 
@@ -82,7 +83,7 @@ def get_standings_html(conn, week, standings, current_player_id):
 
         win_percentage_string = "{0:.3f}".format(win_percentage)
 
-        html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, pick_as_string, result, highlight_row)
+        html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, streak, pick_as_string, result, highlight_row)
         rank += 1 
 
         # end for
@@ -91,7 +92,7 @@ def get_standings_html(conn, week, standings, current_player_id):
     return html
 
 
-def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_points, pick_as_string, result, highlight_row):
+def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result, highlight_row):
     """
     Build HTML string of single row in standings
     """
@@ -106,7 +107,8 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 <td><b>{}</b></td>
 <td><b>{}</b></td>
 <td><b>{}</b></td>
-</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, pick_as_string, result)
+<td><b>{}</b></td>
+</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
     else:
         html = """
 <tr>
@@ -118,7 +120,8 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 <td>{}</td>
 <td>{}</td>
 <td>{}</td>
-</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, pick_as_string, result)
+<td>{}</td>
+</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
 
     return html
 
