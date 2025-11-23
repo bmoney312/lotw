@@ -927,7 +927,7 @@ def get_standings(conn):
     """
 
     with conn.cursor() as cur:
-        select_statement = "SELECT Standings_" + str(get_current_year()) + ".player_id, `last_name`, `first_name`, `past_titles`, `rookie`, `wins`, `losses`, `win_percentage`, `ats_points` FROM Standings_" + str(get_current_year()) + " INNER JOIN Players ON Standings_" + str(get_current_year()) + ".player_id = Players.player_id ORDER BY win_percentage DESC, ats_points DESC, last_name ASC, first_name ASC"
+        select_statement = "SELECT Standings_" + str(get_current_year()) + ".player_id, `last_name`, `first_name`, `past_titles`, `rookie`, `wins`, `losses`, `win_percentage`, `ats_points`, `streak` FROM Standings_" + str(get_current_year()) + " INNER JOIN Players ON Standings_" + str(get_current_year()) + ".player_id = Players.player_id ORDER BY win_percentage DESC, ats_points DESC, last_name ASC, first_name ASC"
         logger.debug("get_standings(): ".format(select_statement))
         cur.execute(select_statement)
         rows = cur.fetchall()
