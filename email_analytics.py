@@ -6,7 +6,7 @@ import logging
 import datetime
 from time import sleep
 from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name
-from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line
+from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line, build_html
 
 # global variables
 logger = logging.getLogger()
@@ -55,47 +55,6 @@ def get_pick_details(conn, pick_team_id, week, year):
             cls = "Pick'em"
 
         return cls, relevant_line
-
-#def get_pick_classification(conn, pick_team_id, week, year):
-#    """
-#    Determine if a specific pick was a Favorite, Underdog, or Pick'em.
-#    Returns: 'Favorite', 'Underdog', 'Push', or None if data missing
-#    """
-#    with conn.cursor() as cur:
-#        # Get game details for the pick
-#        # We need to find the game where the picked team is either home or away
-#        table_name = "Games_{}".format(year)
-#        sql = """
-#            SELECT home_team_id, away_team_id, home_team_line 
-#            FROM {} 
-#            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
-#        """.format(table_name)
-#        cur.execute(sql, (week, pick_team_id, pick_team_id))
-#        row = cur.fetchone()
-#        
-#        if not row:
-#            return None
-#
-#        home_team, away_team, home_line = row
-#        
-#        if home_line is None:
-#            return None
-#            
-#        if home_line == 0:
-#            return "Pick'em"
-#            
-#        # Logic: home_line is from Home perspective. 
-#        # e.g. -3.5 means Home is favored by 3.5.
-#        # e.g. +3.5 means Home is underdog by 3.5.
-#        
-#        if pick_team_id == home_team:
-#            if home_line < 0: return "Favorite"
-#            if home_line > 0: return "Underdog"
-#        elif pick_team_id == away_team:
-#            if home_line > 0: return "Favorite" # Home is underdog, so Away is fav
-#            if home_line < 0: return "Underdog" # Home is fav, so Away is dog
-#
-#    return None
 
 def get_player_season_details(conn, player_id, year):
     """
@@ -390,6 +349,18 @@ def lambda_handler(event, context):
     mail_host = os.environ['mail_host']
     mail_port = os.environ['mail_port']
     mail_from = '"Brendan Connell" <bmoney312@lock-of-the-week.com>' # Or generic sender
+
+    # --- Retry Configuration ---
+    try:
+        MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
+    except ValueError:
+        MAX_RETRIES = 5
+    
+    try:
+        RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
+    except ValueError:
+        RETRY_SLEEP_SECONDS = 15
+    # --- End Retry Configuration ---
     
     current_year = get_current_year()
     
@@ -403,14 +374,12 @@ def lambda_handler(event, context):
     player_id = os.environ.get('player_id')
     players = []
     if request_type == "Scheduled Event":
-        sys.exit()
-        #players = get_all_paid_players(conn)
+        players = get_all_paid_players(conn)
     elif request_type == "manual_run":
-        sys.exit()
-    #    if player_id is not None:
-    #        players = get_player(conn, int(player_id))
-    #    else:
-    #        players = get_all_paid_players(conn)
+        if player_id is not None:
+            players = get_player(conn, int(player_id))
+        else:
+            players = get_all_paid_players(conn)
     elif request_type == "test":
         players = get_player(conn, int(1))
     else:
@@ -475,9 +444,49 @@ def lambda_handler(event, context):
         subject = "lotw: pick analytics report: {} {}".format(first, last)
 
         # 4. Send Email
+        #logger.info("Sending report to {} {} ({})".format(first, last, p_id))
+        #smtp_send(smtp_relay, subject, html_body, [p_email], mail_from)
+
+        # 4. Send Email with Retry Logic
         logger.info("Sending report to {} {} ({})".format(first, last, p_id))
-        smtp_send(smtp_relay, subject, html_body, [p_email], mail_from)
-        
+        email_sent_successfully = False
+        for attempt in range(MAX_RETRIES):
+            email_result = smtp_send(smtp_relay, subject, html_body, [p_email], mail_from)
+            
+            if email_result is True:
+                logger.info("Email sent successfully to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
+                email_sent_successfully = True
+                break # Exit retry loop on success
+            else:
+                logger.error("Email failed to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
+                if attempt < MAX_RETRIES - 1:
+                    logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
+                    smtp_relay.close()
+                    sleep(RETRY_SLEEP_SECONDS)
+
+                    # Reconnect to SMTP relay
+                    smtp_relay = None
+                    smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
+
+                    if smtp_relay is None:
+                        logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
+                        break # Break retry loop if reconnect fails
+                else:
+                    logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, p_id, p_email))
+
+        # If all retries failed, log and handle
+        if not email_sent_successfully:
+            logger.error("Aborting email send for player {} {} after all retries.".format(p_id, p_email))
+
+            if smtp_relay is None:
+                 logger.error("SMTP connection is dead.")
+
+            # Close connections and exit with 504 error as requested
+            conn.close()
+            if smtp_relay:
+                smtp_relay.close()
+            return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
+
         # Gentle pacing
         sleep(1)
 
