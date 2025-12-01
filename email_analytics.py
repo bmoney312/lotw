@@ -13,6 +13,47 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # --- Helper Functions ---
+
+def get_player_yearly_history(conn, player_id, start_year, end_year):
+    """
+    Get year-by-year win/loss record for a player.
+    Returns a list of dicts: [{'year': 2020, 'w': 10, 'l': 8}, ...]
+    """
+    history = []
+    for year in range(start_year, end_year + 1):
+        table_name = "Picks_{}".format(year)
+        try:
+            with conn.cursor() as cur:
+                # Query to count W/L for specific year
+                sql = """
+                    SELECT pick_ats
+                    FROM {}
+                    WHERE player_id = %s
+                    AND lock_in_time IS NOT NULL
+                    AND lock_in_time <= CURRENT_TIMESTAMP
+                """.format(table_name)
+                cur.execute(sql, (player_id,))
+                rows = cur.fetchall()
+
+            w = 0
+            l = 0
+            played = False
+            for row in rows:
+                pick_ats = row[0]
+                if pick_ats is not None:
+                    played = True
+                    if pick_ats > 0: w += 1
+                    elif pick_ats <= 0: l += 1 # Counts Push as Loss per existing logic
+
+            if played:
+                history.append({'year': year, 'w': w, 'l': l})
+
+        except Exception:
+            # Table might not exist for that year or future year
+            continue
+
+    return history
+
 def get_pick_details(conn, pick_team_id, week, year):
     """
     Determine the classification (Favorite/Underdog) and the specific line 
@@ -56,9 +97,31 @@ def get_pick_details(conn, pick_team_id, week, year):
 
         return cls, relevant_line
 
+def get_game_result_string(conn, pick_team_id, week, year):
+    """
+    Fetch the final game score in the format: 'AwayTeam Score, HomeTeam Score'
+    using team abbreviations.
+    """
+    table_name = "Games_{}".format(year)
+    with conn.cursor() as cur:
+        sql = """
+            SELECT away_team_id, away_team_score, home_team_id, home_team_score
+            FROM {}
+            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
+        """.format(table_name)
+        cur.execute(sql, (week, pick_team_id, pick_team_id))
+        row = cur.fetchone()
+
+        if row:
+            away, a_score, home, h_score = row
+            if a_score is not None and h_score is not None:
+                return "{} {} v {} {}".format(away, a_score, home, h_score)
+
+    return "-"
+
 def get_player_season_details(conn, player_id, year):
     """
-    Get weekly breakdown for current year: Week, Pick, Result, Fav/Dog status.
+    Get weekly breakdown for current year: Week, Pick, Game Result, Result, Fav/Dog status.
     Appends the spread to the pick name.
     """
     picks_table = "Picks_{}".format(year)
@@ -86,6 +149,9 @@ def get_player_season_details(conn, player_id, year):
         # Get Classification and Line
         classification, line = get_pick_details(conn, pick, week, year)
 
+        # Get Game Result String
+        game_result = get_game_result_string(conn, pick, week, year)
+
         if classification == "Favorite":
             fav_count += 1
         elif classification == "Underdog":
@@ -109,6 +175,7 @@ def get_player_season_details(conn, player_id, year):
         weekly_data.append({
             'week': week,
             'pick': pick_display, # Use formatted string
+            'game_result': game_result, # Added field
             'result': result_str,
             'type': classification if classification else "-"
         })
@@ -159,10 +226,12 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
 def get_team_ats_records(conn, year):
     """
     Calculate every NFL team's record against the spread for the current year.
-    Returns list of tuples sorted by Win %: (Full Team Name, Wins, Losses, Win%)
+    Returns list of tuples sorted by Win %:
+    (Full Team Name, Wins, Losses, Win%, HomeWins, HomeLosses, AwayWins, AwayLosses)
     """
     games_table = "Games_{}".format(year)
-    team_stats = {} # { 'TEAM_ID': {'w': 0, 'l': 0} }
+    # Stats structure: { 'TEAM_ID': {'w': 0, 'l': 0, 'hw': 0, 'hl': 0, 'aw': 0, 'al': 0} }
+    team_stats = {}
 
     with conn.cursor() as cur:
         sql = "SELECT home_team_id, home_team_ats, away_team_id, away_team_ats FROM {} WHERE home_team_ats IS NOT NULL".format(games_table)
@@ -172,16 +241,27 @@ def get_team_ats_records(conn, year):
     for row in rows:
         home, home_ats, away, away_ats = row
 
-        if home not in team_stats: team_stats[home] = {'w':0, 'l':0}
-        if away not in team_stats: team_stats[away] = {'w':0, 'l':0}
+        # Initialize dict entry if not exists
+        if home not in team_stats:
+            team_stats[home] = {'w':0, 'l':0, 'hw':0, 'hl':0, 'aw':0, 'al':0}
+        if away not in team_stats:
+            team_stats[away] = {'w':0, 'l':0, 'hw':0, 'hl':0, 'aw':0, 'al':0}
 
         # Home Result
-        if home_ats > 0: team_stats[home]['w'] += 1
-        elif home_ats <= 0: team_stats[home]['l'] += 1
+        if home_ats > 0:
+            team_stats[home]['w'] += 1
+            team_stats[home]['hw'] += 1
+        elif home_ats <= 0:
+            team_stats[home]['l'] += 1
+            team_stats[home]['hl'] += 1
 
         # Away Result
-        if away_ats > 0: team_stats[away]['w'] += 1
-        elif away_ats <= 0: team_stats[away]['l'] += 1
+        if away_ats > 0:
+            team_stats[away]['w'] += 1
+            team_stats[away]['aw'] += 1
+        elif away_ats <= 0:
+            team_stats[away]['l'] += 1
+            team_stats[away]['al'] += 1
 
     # Convert to list and sort
     results = []
@@ -196,7 +276,8 @@ def get_team_ats_records(conn, year):
         if full_name is None:
             full_name = team_id # Fallback
 
-        results.append((full_name, w, l, pct))
+        # Append expanded stats to results tuple
+        results.append((full_name, w, l, pct, stats['hw'], stats['hl'], stats['aw'], stats['al']))
 
     # Sort by Win % desc, then Wins desc
     results.sort(key=lambda x: (x[3], x[1]), reverse=True)
@@ -233,14 +314,15 @@ def get_all_career_standings(conn, start_year, end_year):
 # --- HTML Builders ---
 
 def build_analytics_html(
-    first_name, 
+    first_name,
     current_year,
-    weekly_data, 
-    season_fav, season_dog, 
+    weekly_data,
+    season_fav, season_dog,
     season_wins, season_losses, rank, total_players_season,
     career_wins, career_losses, career_fav, career_dog,
     team_ats_records,
     all_career_standings,
+    yearly_history,
     current_player_id
 ):
     """
@@ -257,7 +339,7 @@ def build_analytics_html(
         .loss { color: red; }
     </style>
     """
-    
+
     html = "<html><head>{}</head><body>".format(style)
 
     # 1. Current Season Performance
@@ -268,31 +350,55 @@ def build_analytics_html(
     html += "<b>Record:</b> {}-{} ({:.1f}%)<br>".format(season_wins, season_losses, season_pct)
     html += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
     html += "<b>Tendencies:</b> {} Favorites / {} Underdogs<br><br>".format(season_fav, season_dog)
-    
-    html += "<table><tr><th>Week</th><th>Pick</th><th>Type</th><th>Result</th></tr>"
+
+    # Updated table headers and row to include Game Result
+    html += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Type</th><th>Result</th></tr>"
     for row in weekly_data:
         res_class = "win" if row['result'] == "Win" else ("loss" if (row['result'] == "Loss" or row['result'] == "Loss (Push)") else "")
-        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
-            row['week'], row['pick'], row['type'], res_class, row['result']
+        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
+            row['week'], row['pick'], row['game_result'], row['type'], res_class, row['result']
         )
     html += "</table><br><br>"
 
-    # 2. Team ATS Records
+    # 2. Team ATS Records (Updated with Home/Away splits)
     html += "<h3>{} NFL Team ATS Records - LOTW Lines</h3>".format(current_year)
-    html += "<table><tr><th>Team</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
+    html += "<table><tr><th>Team</th><th>Overall</th><th>Win %</th><th>Home ATS</th><th>Away ATS</th></tr>"
     for team in team_ats_records:
-        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(
-            team[0], team[1], team[2], team[3]*100
+        # Tuple: (Name, Wins, Losses, Pct, HW, HL, AW, AL)
+        html += "<tr><td>{}</td><td>{}-{}</td><td>{:.1f}%</td><td>{}-{}</td><td>{}-{}</td></tr>".format(
+            team[0], team[1], team[2], team[3]*100, team[4], team[5], team[6], team[7]
         )
     html += "</table><br><br>"
 
     # 3. Career Performance
     career_total = career_wins + career_losses
     career_pct = (career_wins / career_total * 100) if career_total > 0 else 0.0
-    
+
     html += "<h3>Career Performance (since 2018)</h3>"
     html += "<b>Your Career Record:</b> {}-{} ({:.1f}%)<br>".format(career_wins, career_losses, career_pct)
     html += "<b>Your Career Tendencies:</b> {} Favorites / {} Underdogs<br><br>".format(career_fav, career_dog)
+
+    # Year-by-Year Record
+    html += "<h4>Career Record by Year</h4>"
+    html += "<table><tr><th>Year</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
+    
+    total_w = 0
+    total_l = 0
+    
+    for row in yearly_history:
+        y = row['year']
+        w = row['w']
+        l = row['l']
+        total_w += w
+        total_l += l
+        pct = (w / (w+l) * 100) if (w+l) > 0 else 0.0
+        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(y, w, l, pct)
+    
+    # Total Row for new table
+    t_pct = (total_w / (total_w+total_l) * 100) if (total_w+total_l) > 0 else 0.0
+    html += "<tr style='font-weight:bold; background-color:#e6e6e6'><td>Total</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(total_w, total_l, t_pct)
+    
+    html += "</table><br><br>"
 
     # 4. All Players Career Standings
     html += "<h3>LOTW Career Standings (since 2018, minimum 2 seasons)</h3>"
@@ -302,14 +408,13 @@ def build_analytics_html(
         # p structure: (id, name, wins, losses, pct)
         p_id_loop = p[0]
         p_name = p[1]
-        
+
         # Bold name if it matches current player
         if p_id_loop == current_player_id:
-            #p_name = "<b>{}</b>".format(p_name)
             html += "<tr><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{:.1f}%</b></td></tr>".format(
                 c_rank, p_name, p[2], p[3], p[4]*100
             )
-        else:    
+        else:
             html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(
                 c_rank, p_name, p[2], p[3], p[4]*100
             )
@@ -318,7 +423,6 @@ def build_analytics_html(
 
     html += "</body></html>"
     return html
-
 
 # --- Main Lambda Handler ---
 
@@ -431,23 +535,23 @@ def lambda_handler(event, context):
         logger.info("Generating career stats for {} {} ({})".format(first, last, p_id))
         c_wins, c_losses, c_fav, c_dog = get_player_career_stats(conn, p_id, 2018, current_year)
 
-        # 3. Build HTML
+        # 3. Get Yearly History (New)
+        yearly_history = get_player_yearly_history(conn, p_id, 2018, current_year)
+
+        # 4. Build HTML
         html_body = build_analytics_html(
             first, current_year,
             weekly_data, s_fav, s_dog, s_wins, s_losses, rank, total_players_season,
             c_wins, c_losses, c_fav, c_dog,
             team_ats_records,
             all_career_standings,
+            yearly_history,
             p_id
         )
         
         subject = "lotw: pick analytics report: {} {}".format(first, last)
 
-        # 4. Send Email
-        #logger.info("Sending report to {} {} ({})".format(first, last, p_id))
-        #smtp_send(smtp_relay, subject, html_body, [p_email], mail_from)
-
-        # 4. Send Email with Retry Logic
+        # 5. Send Email with Retry Logic
         logger.info("Sending report to {} {} ({})".format(first, last, p_id))
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
