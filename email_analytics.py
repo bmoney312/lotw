@@ -20,6 +20,8 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
     Returns a list of dicts: [{'year': 2020, 'w': 10, 'l': 8}, ...]
     """
     history = []
+    current_year_val = get_current_year()
+
     for year in range(start_year, end_year + 1):
         table_name = "Picks_{}".format(year)
         try:
@@ -46,6 +48,17 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
                     elif pick_ats <= 0: l += 1 # Counts Push as Loss per existing logic
 
             if played:
+                # Adjust record for missing weeks in past seasons
+                if year < current_year_val:
+                    if year <= 2020:
+                        season_weeks = 21
+                    else:
+                        season_weeks = 22
+
+                    total_picks = w + l
+                    if total_picks < season_weeks:
+                        l += (season_weeks - total_picks)
+
                 history.append({'year': year, 'w': w, 'l': l})
 
         except Exception:
@@ -286,11 +299,13 @@ def get_team_ats_records(conn, year):
 def get_all_career_standings(conn, start_year, end_year):
     """
     Aggregate career records for ALL players since start_year.
+    Only includes players registered for the current season (end_year).
     Returns list of tuples: (Player ID, Player Name, Wins, Losses, Win%)
     """
-    # First get all players
+    # First get all players registered for the current season (end_year)
     with conn.cursor() as cur:
-        cur.execute("SELECT player_id, first_name, last_name FROM Players")
+        sql = "SELECT player_id, first_name, last_name FROM Players WHERE `{}_registration` = 1".format(end_year)
+        cur.execute(sql)
         players = cur.fetchall()
 
     career_standings = []
@@ -301,10 +316,11 @@ def get_all_career_standings(conn, start_year, end_year):
 
         total = w + l
         # Filter: Omit players with fewer than 42 career picks (two seasons)
+        # You can keep or remove this filter depending on if you want *all* active players
+        # regardless of history length. I will leave it as is to preserve existing logic.
         if total >= 42:
             pct = w / total
             full_name = "{} {}".format(fname, lname)
-            # Added p_id to tuple at index 0
             career_standings.append((p_id, full_name, w, l, pct))
 
     # Sort by Win % (index 4), then Wins (index 2)
@@ -401,7 +417,8 @@ def build_analytics_html(
     html += "</table><br><br>"
 
     # 4. All Players Career Standings
-    html += "<h3>LOTW Career Standings (since 2018, minimum 2 seasons)</h3>"
+    html += "<h3>LOTW Career Standings)</h3>"
+    html += "<p><b>Since 2018. Active players. Minimum two seasons.</b></p>"
     html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
     c_rank = 1
     for p in all_career_standings:
@@ -555,7 +572,7 @@ def lambda_handler(event, context):
         logger.info("Sending report to {} {} ({})".format(first, last, p_id))
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
-            email_result = smtp_send(smtp_relay, subject, html_body, [p_email], mail_from)
+            email_result = smtp_send(smtp_relay, subject, html_body, [p_email, 'bmoney312@gmail.com'], mail_from)
             
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
