@@ -69,10 +69,10 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
 
 def get_pick_details(conn, pick_team_id, week, year):
     """
-    Determine the classification (Favorite/Underdog) and the specific line 
-    for the picked team.
-    Returns: (Classification, Line) 
-             e.g. ('Favorite', -3.5) or (None, None)
+    Determine the classification (Favorite/Underdog), the specific line, 
+    and the Site (Home/Road) for the picked team.
+    Returns: (Classification, Line, Site) 
+             e.g. ('Favorite', -3.5, 'Home') or (None, None, None)
     """
     with conn.cursor() as cur:
         # Get game details for the pick
@@ -86,19 +86,21 @@ def get_pick_details(conn, pick_team_id, week, year):
         row = cur.fetchone()
         
         if not row:
-            return None, None
+            return None, None, None
 
         home_team, away_team, home_line = row
         
         if home_line is None:
-            return None, None
+            return None, None, None
             
         # Calculate line from the perspective of the PICKED team
         # home_team_line is relative to Home (e.g. -3 means Home is favored)
         if pick_team_id == home_team:
             relevant_line = home_line
+            site = "Home"
         else:
             relevant_line = -home_line
+            site = "Road"
             
         # Determine Classification
         if relevant_line < 0: 
@@ -108,7 +110,7 @@ def get_pick_details(conn, pick_team_id, week, year):
         else: 
             cls = "Pick'em"
 
-        return cls, relevant_line
+        return cls, relevant_line, site
 
 def get_game_result_string(conn, pick_team_id, week, year):
     """
@@ -134,7 +136,7 @@ def get_game_result_string(conn, pick_team_id, week, year):
 
 def get_player_season_details(conn, player_id, year):
     """
-    Get weekly breakdown for current year: Week, Pick, Game Result, Result, Fav/Dog status.
+    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
     Appends the spread to the pick name.
     """
     picks_table = "Picks_{}".format(year)
@@ -159,8 +161,8 @@ def get_player_season_details(conn, player_id, year):
     for row in rows:
         week, pick, pick_ats = row
 
-        # Get Classification and Line
-        classification, line = get_pick_details(conn, pick, week, year)
+        # Get Classification, Line, and Site
+        classification, line, site = get_pick_details(conn, pick, week, year)
 
         # Get Game Result String
         game_result = get_game_result_string(conn, pick, week, year)
@@ -189,6 +191,7 @@ def get_player_season_details(conn, player_id, year):
             'week': week,
             'pick': pick_display, # Use formatted string
             'game_result': game_result, # Added field
+            'site': site if site else "-",
             'result': result_str,
             'type': classification if classification else "-"
         })
@@ -236,7 +239,7 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
                         elif pick_ats <= 0: year_losses += 1
 
                     # Fav/Dog Record
-                    cls, _ = get_pick_details(conn, pick, week, year) # unpack tuple, ignore line
+                    cls, _, _ = get_pick_details(conn, pick, week, year) # unpack tuple, ignore line and site
                     if cls == "Favorite": total_fav += 1
                     elif cls == "Underdog": total_dog += 1
                     elif cls == "Pick'em": total_pickem +=1
@@ -395,11 +398,11 @@ def build_analytics_html(
     html += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
 
     # Updated table headers and row to include Game Result
-    html += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Type</th><th>Result</th></tr>"
+    html += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Site</th><th>Type</th><th>Result</th></tr>"
     for row in weekly_data:
         res_class = "win" if row['result'] == "Win" else ("loss" if (row['result'] == "Loss" or row['result'] == "Loss (Push)") else "")
-        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
-            row['week'], row['pick'], row['game_result'], row['type'], res_class, row['result']
+        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
+            row['week'], row['pick'], row['game_result'], row['site'], row['type'], res_class, row['result']
         )
     html += "</table><br><br>"
 
