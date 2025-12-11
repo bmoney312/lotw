@@ -154,7 +154,7 @@ def get_player_season_details(conn, player_id, year):
     weekly_data = []
     fav_count = 0
     dog_count = 0
-    push_count = 0
+    pickem_count = 0
 
     for row in rows:
         week, pick, pick_ats = row
@@ -170,7 +170,7 @@ def get_player_season_details(conn, player_id, year):
         elif classification == "Underdog":
             dog_count += 1
         elif classification == "Pick'em":
-            push_count += 1
+            pickem_count += 1
 
         # Format Pick String with Line (e.g., "DEN -3")
         if line is not None:
@@ -193,7 +193,7 @@ def get_player_season_details(conn, player_id, year):
             'type': classification if classification else "-"
         })
 
-    return weekly_data, fav_count, dog_count
+    return weekly_data, fav_count, dog_count, pickem_count
 
 def get_player_career_stats(conn, player_id, start_year, end_year):
     """
@@ -203,10 +203,14 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
     total_losses = 0
     total_fav = 0
     total_dog = 0
+    total_pickem = 0
+
+    current_year_val = get_current_year() #
 
     for year in range(start_year, end_year + 1):
         try:
             picks_table = "Picks_{}".format(year)
+
             with conn.cursor() as cur:
                 sql = """
                     SELECT week, pick, pick_ats
@@ -218,23 +222,46 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
                 cur.execute(sql, (player_id,))
                 rows = cur.fetchall()
 
+                # Track stats for this specific year to apply adjustment logic
+                year_wins = 0
+                year_losses = 0
+                year_picks = 0
+
                 for row in rows:
                     week, pick, pick_ats = row
 
                     # W/L Record
                     if pick_ats is not None:
-                        if pick_ats > 0: total_wins += 1
-                        elif pick_ats <= 0: total_losses += 1
+                        if pick_ats > 0: year_wins += 1
+                        elif pick_ats <= 0: year_losses += 1
 
                     # Fav/Dog Record
                     cls, _ = get_pick_details(conn, pick, week, year) # unpack tuple, ignore line
                     if cls == "Favorite": total_fav += 1
                     elif cls == "Underdog": total_dog += 1
+                    elif cls == "Pick'em": total_pickem +=1
+
+                # if player has any picks this year
+                if len(rows) > 0:
+                    # Adjust record for missing weeks
+                    if year < current_year_val:
+                        if year <= 2020:
+                            season_weeks = 21
+                        else:
+                            season_weeks = 22
+
+                        year_picks = year_wins + year_losses
+                        if year_picks < season_weeks:
+                            year_losses += (season_weeks - year_picks)
+
+                    # Add this year wins and losses to total
+                    total_wins += year_wins
+                    total_losses += year_losses
 
         except Exception as e:
             continue
 
-    return total_wins, total_losses, total_fav, total_dog
+    return total_wins, total_losses, total_fav, total_dog, total_pickem
 
 def get_team_ats_records(conn, year):
     """
@@ -312,7 +339,7 @@ def get_all_career_standings(conn, start_year, end_year):
 
     for player in players:
         p_id, fname, lname = player
-        w, l, f, d = get_player_career_stats(conn, p_id, start_year, end_year)
+        w, l, f, d, p = get_player_career_stats(conn, p_id, start_year, end_year)
 
         total = w + l
         # Filter: Omit players with fewer than 42 career picks (two seasons)
@@ -333,9 +360,9 @@ def build_analytics_html(
     first_name,
     current_year,
     weekly_data,
-    season_fav, season_dog,
+    season_fav, season_dog, season_pickem,
     season_wins, season_losses, rank, total_players_season,
-    career_wins, career_losses, career_fav, career_dog,
+    career_wins, career_losses, career_fav, career_dog, career_pickem,
     team_ats_records,
     all_career_standings,
     yearly_history,
@@ -365,7 +392,7 @@ def build_analytics_html(
     html += "<h3>{} Season Performance</h3>".format(current_year)
     html += "<b>Record:</b> {}-{} ({:.1f}%)<br>".format(season_wins, season_losses, season_pct)
     html += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
-    html += "<b>Tendencies:</b> {} Favorites / {} Underdogs<br><br>".format(season_fav, season_dog)
+    html += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
 
     # Updated table headers and row to include Game Result
     html += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Type</th><th>Result</th></tr>"
@@ -392,7 +419,7 @@ def build_analytics_html(
 
     html += "<h3>Career Performance (since 2018)</h3>"
     html += "<b>Your Career Record:</b> {}-{} ({:.1f}%)<br>".format(career_wins, career_losses, career_pct)
-    html += "<b>Your Career Tendencies:</b> {} Favorites / {} Underdogs<br><br>".format(career_fav, career_dog)
+    html += "<b>Your Career Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(career_fav, career_dog, career_pickem)
 
     # Year-by-Year Record
     html += "<h4>Career Record by Year</h4>"
@@ -416,15 +443,21 @@ def build_analytics_html(
     
     html += "</table><br><br>"
 
-    # 4. All Players Career Standings
-    html += "<h3>LOTW Career Standings)</h3>"
-    html += "<p><b>Since 2018. Active players. Minimum two seasons.</b></p>"
+    # 4. All Players Career Records
+    html += "<h3>LOTW: Top 50 Career Win Percentage (since 2018)</h3>"
+    html += "<p><b>Active players. Minimum two seasons. NO PICKs counted as losses.</b></p>"
     html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
+
     c_rank = 1
+    prev_player_win_percentage = 0.0
     for p in all_career_standings:
         # p structure: (id, name, wins, losses, pct)
         p_id_loop = p[0]
         p_name = p[1]
+
+        # only report top 50
+        if (c_rank > 50) and (prev_player_win_percentage > p[4]*100):
+            break
 
         # Bold name if it matches current player
         if p_id_loop == current_player_id:
@@ -436,6 +469,7 @@ def build_analytics_html(
                 c_rank, p_name, p[2], p[3], p[4]*100
             )
         c_rank += 1
+        prev_player_win_percentage = p[4]*100
     html += "</table><br><br>"
 
     html += "</body></html>"
@@ -532,7 +566,7 @@ def lambda_handler(event, context):
         logger.info("Generating report for {} {} ({})".format(first, last, p_id))
         
         # 1. Get Current Season Details
-        weekly_data, s_fav, s_dog = get_player_season_details(conn, p_id, current_year)
+        weekly_data, s_fav, s_dog, s_pickem = get_player_season_details(conn, p_id, current_year)
         
         # Find Rank and Record from current standings
         s_wins = 0
@@ -550,7 +584,7 @@ def lambda_handler(event, context):
         
         # 2. Get Career Stats (Player specific)
         logger.info("Generating career stats for {} {} ({})".format(first, last, p_id))
-        c_wins, c_losses, c_fav, c_dog = get_player_career_stats(conn, p_id, 2018, current_year)
+        c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(conn, p_id, 2018, current_year)
 
         # 3. Get Yearly History (New)
         yearly_history = get_player_yearly_history(conn, p_id, 2018, current_year)
@@ -558,8 +592,8 @@ def lambda_handler(event, context):
         # 4. Build HTML
         html_body = build_analytics_html(
             first, current_year,
-            weekly_data, s_fav, s_dog, s_wins, s_losses, rank, total_players_season,
-            c_wins, c_losses, c_fav, c_dog,
+            weekly_data, s_fav, s_dog, s_pickem, s_wins, s_losses, rank, total_players_season,
+            c_wins, c_losses, c_fav, c_dog, c_pickem,
             team_ats_records,
             all_career_standings,
             yearly_history,
