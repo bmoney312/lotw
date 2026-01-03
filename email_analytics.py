@@ -5,7 +5,7 @@ import pymysql
 import logging
 import datetime
 from time import sleep
-from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name
+from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name, get_standings_full_name
 from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line, build_html
 
 # global variables
@@ -333,15 +333,17 @@ def get_all_career_standings(conn, start_year, end_year):
     Returns list of tuples: (Player ID, Player Name, Wins, Losses, Win%)
     """
     # First get all players registered for the current season (end_year)
+    # UPDATED: Fetch past_titles and rookie status
     with conn.cursor() as cur:
-        sql = "SELECT player_id, first_name, last_name FROM Players WHERE `{}_registration` = 1".format(end_year)
+        sql = "SELECT player_id, first_name, last_name, past_titles, rookie FROM Players WHERE `{}_registration` = 1".format(end_year)
         cur.execute(sql)
         players = cur.fetchall()
 
     career_standings = []
 
     for player in players:
-        p_id, fname, lname = player
+        # UPDATED: Unpack new columns
+        p_id, fname, lname, past_titles, rookie = player
         w, l, f, d, p = get_player_career_stats(conn, p_id, start_year, end_year)
 
         total = w + l
@@ -350,7 +352,10 @@ def get_all_career_standings(conn, start_year, end_year):
         # regardless of history length. I will leave it as is to preserve existing logic.
         if total >= 42:
             pct = w / total
-            full_name = "{} {}".format(fname, lname)
+
+            # UPDATED: Use get_standings_full_name to add copy/reg symbols
+            full_name = get_standings_full_name(fname, lname, past_titles, rookie)
+
             career_standings.append((p_id, full_name, w, l, pct))
 
     # Sort by Win % (index 4), then Wins (index 2)
@@ -360,7 +365,7 @@ def get_all_career_standings(conn, start_year, end_year):
 # --- HTML Builders ---
 
 def build_analytics_html(
-    first_name,
+    first_name, last_name,
     current_year,
     weekly_data,
     season_fav, season_dog, season_pickem,
@@ -386,7 +391,7 @@ def build_analytics_html(
     </style>
     """
 
-    html = "<html><head>{}</head><body>".format(style)
+    html = "<html><head>{}</head><body><br><h2>LOTW Pick Analytics Report: {} {}</h2><br>".format(style, first_name, last_name)
 
     # 1. Current Season Performance
     season_total = season_wins + season_losses
@@ -594,7 +599,7 @@ def lambda_handler(event, context):
 
         # 4. Build HTML
         html_body = build_analytics_html(
-            first, current_year,
+            first, last, current_year,
             weekly_data, s_fav, s_dog, s_pickem, s_wins, s_losses, rank, total_players_season,
             c_wins, c_losses, c_fav, c_dog, c_pickem,
             team_ats_records,
@@ -603,7 +608,7 @@ def lambda_handler(event, context):
             p_id
         )
         
-        subject = "lotw: pick analytics report: {} {}".format(first, last)
+        subject = "lotw: pick analytics report"
 
         # 5. Send Email with Retry Logic
         logger.info("Sending report to {} {} ({})".format(first, last, p_id))
@@ -617,7 +622,7 @@ def lambda_handler(event, context):
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
-                if attempt < MAX_RETRIES - 1:
+                if attempt <= MAX_RETRIES:
                     logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
                     smtp_relay.close()
                     sleep(RETRY_SLEEP_SECONDS)
@@ -637,16 +642,19 @@ def lambda_handler(event, context):
             logger.error("Aborting email send for player {} {} after all retries.".format(p_id, p_email))
 
             if smtp_relay is None:
-                 logger.error("SMTP connection is dead.")
-
-            # Close connections and exit with 504 error as requested
-            conn.close()
-            if smtp_relay:
+                logger.error("SMTP connection is dead.")
+            else:
+                logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
+
+            # close database connection
+            conn.close()
+
+            # return error if all players do not receive email
             return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
 
         # Gentle pacing
-        sleep(1)
+        sleep(2)
 
     smtp_relay.close()
     conn.close()

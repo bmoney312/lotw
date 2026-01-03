@@ -5,6 +5,7 @@ import pymysql
 import logging
 import datetime
 import pytz
+from zoneinfo import ZoneInfo
 from time import sleep
 from lotw import get_current_week, get_all_paid_players, get_player, get_line, get_current_year, in_daylight_savings
 from lotw import get_all_picks, get_current_pick, get_standings, get_standings_full_name
@@ -318,9 +319,13 @@ def lambda_handler(event, context):
         logger.info("Sending full pick summary")
     else:
         commish_message = "The picks below are now <b>locked in</b>. Good luck! -BMC<br>"
-        weekday = time_now.weekday()
-        if weekday == 4:
-            commish_message = "The following players like the Thursday night special tonight. " + commish_message
+
+        # add Thursday night special message
+        #weekday = time_now.weekday()
+        weekday = time_now.astimezone(ZoneInfo("America/New_York")).weekday()
+        hour = time_now.hour # hour in UTC, Thursday night is Friday morning UTC
+        if (weekday == 3) and (hour < 4):
+            commish_message = "The following players like the Thursday night special. " + commish_message
 
     # get standings and current picks
     standings = get_standings(conn)
@@ -328,7 +333,7 @@ def lambda_handler(event, context):
     logger.debug("player_picks: {}".format(player_picks))
 
     if len(player_picks) == 0:
-        return response(404, 'text/html', build_html("No picks found that locked in at {}".format(pick_deadline)))
+        return response(200, 'text/html', build_html("No picks found that locked in at {}".format(pick_deadline)))
 
     # connect to SMTP relay
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
@@ -377,7 +382,7 @@ def lambda_handler(event, context):
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
-                if attempt < MAX_RETRIES - 1:
+                if attempt <= MAX_RETRIES:
                     logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
                     smtp_relay.close()
                     sleep(RETRY_SLEEP_SECONDS)
@@ -397,13 +402,19 @@ def lambda_handler(event, context):
             logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
             
             if smtp_relay is None:
-                 logger.error("SMTP connection is dead.")
-            
-            # Close connections and exit with 504 error as requested
-            conn.close()
-            if smtp_relay:
+                logger.error("SMTP connection is dead.")
+            else:
+                logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
+            
+            # close database connection
+            conn.close()
+
+            # return error if all players do not receive email
             return response(504, 'text/html', build_html("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
+
+        # Gentle pacing
+        sleep(2)
 
     # close database connection
     conn.close()

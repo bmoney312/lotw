@@ -220,7 +220,7 @@ Would you like to participate in LOTW this season?  Please click the link below 
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
-                if attempt < MAX_RETRIES - 1:
+                if attempt < MAX_RETRIES:
                     logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
                     smtp_relay.close()
                     sleep(RETRY_SLEEP_SECONDS)
@@ -240,13 +240,19 @@ Would you like to participate in LOTW this season?  Please click the link below 
             logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
 
             if smtp_relay is None:
-                 logger.error("SMTP connection is dead.")
-
-            # Close connections and exit with 504 error as requested
-            conn.close()
-            if smtp_relay:
+                logger.error("SMTP connection is dead.")
+            else:
+                logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
+
+            # close database connection
+            conn.close()
+
+            # return error if all players do not receive email
             return response(504, 'text/html', build_html("Registration send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
+
+        # Gentle pacing
+        sleep(2)
 
     # close database connection
     conn.close()
