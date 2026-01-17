@@ -4,15 +4,16 @@ import json
 import pymysql
 import logging
 import datetime
+import boto3
 from time import sleep
 from lotw import get_all_paid_players, get_player, get_standings, get_standings_full_name
-from lotw import get_current_week, get_current_pick, get_standings_message
+from lotw import get_current_week, get_current_pick, get_standings_message, get_current_year
 from lotw import build_html, formatted_line, response, build_html_head, smtp_send, smtp_connect
 
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
+cloudwatch = boto3.client('cloudwatch')
 
 def get_standings_html(conn, week, standings, current_player_id):
     """
@@ -125,6 +126,30 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 
     return html
 
+def emit_emails_sent_metric(week, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'StandingsEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())},
+                        {'Name': 'Week', 'Value': str(week)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted StandingsEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
 
 
 def lambda_handler(event, context):
@@ -237,6 +262,9 @@ def lambda_handler(event, context):
             logger.error("Unexpected missing value for commish message")
             sys.exit()
 
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
     # connect to SMTP relay
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
@@ -284,6 +312,7 @@ def lambda_handler(event, context):
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
@@ -311,15 +340,23 @@ def lambda_handler(event, context):
             else:
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
+
+            # email emails sent metric
+            emit_emails_sent_metric(standings_week, emails_sent_count)
             
             # close database connection
             conn.close()
 
             # return error if all players do not receive email
-            return response(504, 'text/html', build_html("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES)))
+            logger.info("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
+            raise RuntimeError("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
+
+    # emit emails sent metric
+    emit_emails_sent_metric(standings_week, emails_sent_count)
 
     # close database connection
     conn.close()
@@ -328,5 +365,6 @@ def lambda_handler(event, context):
     smtp_relay.close()
 
     # return result
+    logger.info("Standings for week {} sent successfully.".format(standings_week))
     return response(200, 'text/html', build_html("Standings for week {} sent successfully.".format(standings_week)))
 

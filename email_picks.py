@@ -5,6 +5,7 @@ import pymysql
 import logging
 import datetime
 import pytz
+import boto3
 from zoneinfo import ZoneInfo
 from time import sleep
 from lotw import get_current_week, get_all_paid_players, get_player, get_line, get_current_year, in_daylight_savings
@@ -14,7 +15,7 @@ from lotw import build_html, formatted_line, response, send_email, smtp_connect,
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
+cloudwatch = boto3.client('cloudwatch')
 
 def build_picks_html_row(rank, full_name, wins, losses, ats_points, streak, pick, highlight_row):
     """
@@ -200,6 +201,30 @@ def get_picks_at_kickoff_time(conn, week, lock_in_time, send_pick_summary):
         logger.debug("get_picks_at_kickoff_time(): Found these picks at kickoff time {}: {}".format(lock_in_time, picks))
         return picks
 
+def emit_emails_sent_metric(week, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'PicksEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())},
+                        {'Name': 'Week', 'Value': str(week)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted EmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
 
 
 def lambda_handler(event, context):
@@ -332,7 +357,14 @@ def lambda_handler(event, context):
     player_picks = get_picks_at_kickoff_time(conn, week, pick_deadline, send_pick_summary)
     logger.debug("player_picks: {}".format(player_picks))
 
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
+    # exit gracefully if there are no picks to send
     if len(player_picks) == 0:
+        conn.close()
+        emit_emails_sent_metric(week, emails_sent_count)
+        logger.info("No picks found that locked in at {}. Exiting. [200]".format(pick_deadline))
         return response(200, 'text/html', build_html("No picks found that locked in at {}".format(pick_deadline)))
 
     # connect to SMTP relay
@@ -379,6 +411,7 @@ def lambda_handler(event, context):
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
@@ -411,10 +444,16 @@ def lambda_handler(event, context):
             conn.close()
 
             # return error if all players do not receive email
-            return response(504, 'text/html', build_html("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
+            emit_emails_sent_metric(week, emails_sent_count)
+            logger.info("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
+            raise RuntimeError("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
+
+    # Emit the metric emails_sent_count
+    emit_emails_sent_metric(week, emails_sent_count)
 
     # close database connection
     conn.close()
@@ -423,5 +462,6 @@ def lambda_handler(event, context):
     smtp_relay.close()
 
     # return result
+    logger.info("Picks for week {} sent successfully. Exiting. [200]".format(week))
     return response(200, 'text/html', build_html("Picks for week {} sent successfully.".format(week)))
 

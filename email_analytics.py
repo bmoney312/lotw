@@ -4,6 +4,7 @@ import json
 import pymysql
 import logging
 import datetime
+import boto3
 from time import sleep
 from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name, get_standings_full_name
 from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line, build_html
@@ -11,6 +12,7 @@ from lotw import build_html_head, response, smtp_connect, smtp_send, get_standin
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+cloudwatch = boto3.client('cloudwatch')
 
 # --- Helper Functions ---
 
@@ -483,6 +485,31 @@ def build_analytics_html(
     html += "</body></html>"
     return html
 
+def emit_emails_sent_metric(week, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'AnalyticsEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())},
+                        {'Name': 'Week', 'Value': str(week)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted AnalyticsEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
+
 # --- Main Lambda Handler ---
 
 def lambda_handler(event, context):
@@ -526,13 +553,18 @@ def lambda_handler(event, context):
     # --- End Retry Configuration ---
     
     current_year = get_current_year()
-    
-    # Determine recipients
-    #player_id_arg = os.environ.get('player_id')
-    #if player_id_arg:
-    #    players = get_player(conn, int(player_id_arg))
-    #else:
-    #    players = get_all_paid_players(conn)
+
+    # determine current week
+    current_week = os.environ.get('week')
+
+    if current_week is None:
+        current_week = get_current_week(conn)
+    else:
+        current_week = int(week)
+
+    if current_week is None:
+        logger.error("ERROR: Unable to determine current week!")
+        sys.exit()
 
     player_id = os.environ.get('player_id')
     players = []
@@ -548,6 +580,9 @@ def lambda_handler(event, context):
     else:
         logger.error("Invalid request type {}".format(request_type))
         sys.exit()
+
+    # initialize emails sent metric counter
+    emails_sent_count = 0
 
     # --- Pre-calculate Global Stats (Shared across all emails) ---
     logger.info("Calculating Global Stats...")
@@ -608,7 +643,10 @@ def lambda_handler(event, context):
             p_id
         )
         
-        subject = "lotw: pick analytics report"
+        report_week = 1
+        if current_week > 1:
+            report_week = current_week - 1
+        subject = "lotw: pick analytics report for week {}".format(report_week)
 
         # 5. Send Email with Retry Logic
         logger.info("Sending report to {} {} ({})".format(first, last, p_id))
@@ -619,6 +657,7 @@ def lambda_handler(event, context):
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
@@ -647,15 +686,24 @@ def lambda_handler(event, context):
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
+            # emit emails sent metric
+            emit_emails_sent_metric(current_week, emails_sent_count)
+
             # close database connection
             conn.close()
 
             # return error if all players do not receive email
-            return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
+            logger.info("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES))
+            raise RuntimeError("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
 
+    # emit emails sent metric
+    emit_emails_sent_metric(current_week, emails_sent_count)
+
     smtp_relay.close()
     conn.close()
+    logger.info("Analytics reports sent successfully.")
     return response(200, 'text/html', "Analytics reports sent successfully.")

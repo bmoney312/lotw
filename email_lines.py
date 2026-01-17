@@ -4,6 +4,7 @@ import json
 import pymysql
 import logging
 import datetime
+import boto3
 from time import sleep
 from lotw import get_current_week, get_all_paid_players, get_player, get_current_pick, get_team_name
 from lotw import get_auth_token, create_auth_token, datetime_to_string, get_current_year
@@ -12,6 +13,7 @@ from lotw import build_html, formatted_line, response, send_email, smtp_connect,
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+cloudwatch = boto3.client('cloudwatch')
 
 
 def build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token):
@@ -149,6 +151,31 @@ def build_lines_email_body(conn, player_id, week, token):
     return html
 
 
+def emit_emails_sent_metric(week, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'LinesEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())},
+                        {'Name': 'Week', 'Value': str(week)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted LinesEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
+
 
 def lambda_handler(event, context):
     """
@@ -239,6 +266,9 @@ def lambda_handler(event, context):
     logger.info("Request type is {}".format(request_type))
     logger.debug("Players {}".format(players))
 
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
     if smtp_relay is None:
@@ -316,6 +346,7 @@ def lambda_handler(event, context):
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
@@ -344,14 +375,22 @@ def lambda_handler(event, context):
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
+            # emit emails sent metric
+            emit_emails_sent_metric(week, emails_sent_count)
+
             # close database connection
             conn.close()
 
             # return error if all players do not receive email
-            return response(504, 'text/html', build_html("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
+            logger.info("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
+            raise RuntimeError("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
-        # Gentle pacing
+        # gentle pacing
         sleep(2)
+
+    # emit the metric on emails sent
+    emit_emails_sent_metric(week, emails_sent_count)
 
     # close database connection
     conn.close()
@@ -360,5 +399,6 @@ def lambda_handler(event, context):
     smtp_relay.close()
 
     # return result
+    logger.info("Lines for week {} sent successfully.".format(week))
     return response(200, 'text/html', build_html("Lines for week {} sent successfully.".format(week)))
 

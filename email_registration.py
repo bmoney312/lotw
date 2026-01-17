@@ -249,7 +249,8 @@ Would you like to participate in LOTW this season?  Please click the link below 
             conn.close()
 
             # return error if all players do not receive email
-            return response(504, 'text/html', build_html("Registration send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
+            raise RuntimeError("Registration send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Registration send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)

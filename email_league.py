@@ -162,7 +162,8 @@ def lambda_handler(event, context):
             # close database connection
             conn.close()
 
-            return response(504, 'text/html', build_html("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
+            raise RuntimeError("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
