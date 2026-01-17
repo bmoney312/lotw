@@ -17,6 +17,22 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
+
+def is_week_fully_started(conn, week):
+    """
+    Check if all games for the given week have kicked off.
+    Returns True if all games have started, False if any games are upcoming.
+    """
+    time_now = datetime.datetime.now()
+    with conn.cursor() as cur:
+        # Query for any game in the current week where the kickoff time is in the future
+        sql = "SELECT COUNT(*) FROM Games_" + str(get_current_year()) + " WHERE week = %s AND kickoff_time > %s"
+        cur.execute(sql, (week, time_now))
+        upcoming_games_count = cur.fetchone()[0]
+
+    return upcoming_games_count == 0
+
+
 def build_picks_html_row(rank, full_name, wins, losses, ats_points, streak, pick, highlight_row):
     """
     Build picks email table row
@@ -98,7 +114,7 @@ def build_picks_email_head():
 
 
 
-def build_picks_email_body(week, standings, current_picks, message, send_pick_summary, current_player_id):
+def build_picks_email_body(week, standings, current_picks, message, send_pick_summary, current_player_id, conn):
     """
     Given database connection and current week, return body of
     LOTW line email without the html/body tags
@@ -106,6 +122,9 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
     send_pick_summary is boolean, send pick for all players if true (even NOP)
 
     current_picks is dict of format player_id => teams
+
+    Updated to include 'conn' to check game schedules explicitly for hidden vs
+    NO PICK logic
     """
     html = "<body>\n<p>{}</p><br>".format(message)
 
@@ -135,9 +154,13 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
 </tr>
 """.format(week, week)
 
+    # Determine if the full slate has started
+    all_games_started = is_week_fully_started(conn, week)
+
     rank = 1
     for row in standings:
         (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
+        # ... (full_name and highlight logic) ...
         full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
 
         # highlight player's own pick
@@ -145,19 +168,25 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         if player_id == current_player_id:
             highlight_row = True
 
-        pick_as_string = ""
-        if current_picks.get(player_id) is None and send_pick_summary is not True:
-            logger.debug("Player {} not found in current picks".format(player_id))
-            rank += 1
-            continue
-        else:
-            if current_picks.get(player_id) is None:
+        player_pick_data = current_picks.get(player_id)
+
+        if player_pick_data is None:
+            if all_games_started:
+                # Slate is full: No pick was ever submitted
+                pick_as_string = "<i>NO PICK</i>"
+            elif send_pick_summary:
+                # Slate is not full, but summary requested: hide future games
                 pick_as_string = "<i>&lt;hidden&gt;</i>"
             else:
-                (pick, line) = current_picks.get(player_id)
+                # Standard mid-week lock-in email: skip players without current locks
+                rank += 1
+                continue
+        else:
+            (pick, line) = player_pick_data
+            if pick == "NOP" or pick is None:
+                pick_as_string = "<i>NO PICK</i>"
+            else:
                 pick_as_string = "{} {}".format(pick, formatted_line(line))
-
-            logger.debug("Found pick {} for player {} in current picks".format(pick_as_string, player_id))
 
         # no ranks yet in week 1
         if week == 1:
@@ -387,7 +416,7 @@ def lambda_handler(event, context):
                 continue
 
         # build email body for this player
-        picks_email_body = build_picks_email_body(week, standings, player_picks, commish_message, send_pick_summary, player_id)
+        picks_email_body = build_picks_email_body(week, standings, player_picks, commish_message, send_pick_summary, player_id, conn)
         mail_body = build_picks_email_head() + picks_email_body
 
         mail_to = (player_email, 'bmoney312@lock-of-the-week.com')
