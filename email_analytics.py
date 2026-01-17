@@ -538,7 +538,7 @@ def lambda_handler(event, context):
     mail_password = os.environ['mail_password']
     mail_host = os.environ['mail_host']
     mail_port = os.environ['mail_port']
-    mail_from = '"Brendan Connell" <bmoney312@lock-of-the-week.com>' # Or generic sender
+    mail_from = '"Brendan Connell" <bmoney312@gmail.com>' # Or generic sender
 
     # --- Retry Configuration ---
     try:
@@ -567,6 +567,12 @@ def lambda_handler(event, context):
         sys.exit()
 
     player_id = os.environ.get('player_id')
+    start_with_player_id = os.environ.get('start_with_player_id')
+
+    if start_with_player_id:
+        start_with_player_id = int(start_with_player_id)
+        logger.info("Starting with player_id {}".format(start_with_player_id))
+
     players = []
     if request_type == "Scheduled Event":
         players = get_all_paid_players(conn)
@@ -606,6 +612,13 @@ def lambda_handler(event, context):
     # --- Loop Players ---
     for player in players:
         p_id, p_email, last, first, _, _ = player
+
+        # logic to skip players based on start_with_player_id
+        if start_with_player_id is not None and request_type != "test":
+            if p_id < start_with_player_id:
+                logger.info("Skipping player {} which is less than start_with_player_id {}".format(p_id, start_with_player_id))
+                continue
+
         logger.info("Generating report for {} {} ({})".format(first, last, p_id))
         
         # 1. Get Current Season Details
