@@ -370,7 +370,7 @@ def lambda_handler(event, context):
     logger.info("Players {}".format(players))
 
     if send_pick_summary is True:
-        commish_message = commish_message + "All locked in week {} picks given below.  Good luck! -BMC<br>".format(week)
+        commish_message = "All locked in week {} picks given below.  Good luck! -BMC<br>".format(week)
         logger.info("Sending full pick summary")
     else:
         commish_message = "The picks below are now <b>locked in</b>. Good luck! -BMC<br>"
