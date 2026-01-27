@@ -171,14 +171,15 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         player_pick_data = current_picks.get(player_id)
 
         if player_pick_data is None:
-            if all_games_started:
-                # Slate is full: No pick was ever submitted
-                pick_as_string = "<i>NO PICK</i>"
-            elif send_pick_summary:
-                # Slate is not full, but summary requested: hide future games
-                pick_as_string = "<i>&lt;hidden&gt;</i>"
+            if send_pick_summary:
+                if all_games_started:
+                    # all games have started: No pick was ever submitted
+                    pick_as_string = "<i>NO PICK</i>"
+                else:
+                    # all games not started yet, but summary requested: hide future picks
+                    pick_as_string = "<i>&lt;hidden&gt;</i>"
             else:
-                # Standard mid-week lock-in email: skip players without current locks
+                # Standard locked in picks email: skip players who did not pick games starting at this time
                 rank += 1
                 continue
         else:
@@ -369,7 +370,7 @@ def lambda_handler(event, context):
     logger.info("Players {}".format(players))
 
     if send_pick_summary is True:
-        commish_message = "All locked in week {} picks given below.  Good luck! -BMC<br>".format(week)
+        commish_message = commish_message + "All locked in week {} picks given below.  Good luck! -BMC<br>".format(week)
         logger.info("Sending full pick summary")
     else:
         commish_message = "The picks below are now <b>locked in</b>. Good luck! -BMC<br>"
