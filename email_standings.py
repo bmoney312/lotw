@@ -7,7 +7,7 @@ import datetime
 import boto3
 from time import sleep
 from lotw import get_all_paid_players, get_player, get_standings, get_standings_full_name
-from lotw import get_current_week, get_current_pick, get_standings_message, get_current_year
+from lotw import get_current_week, get_current_pick, get_standings_message, get_current_year, get_player_season_details
 from lotw import build_html, formatted_line, response, build_html_head, smtp_send, smtp_connect
 
 # global variables
@@ -19,16 +19,16 @@ def get_standings_html(conn, week, standings, current_player_id):
     """
     Return string of LOTW standings in HTML table
     """
-    html = "<br><br><h4>LOTW: WEEK {} STANDINGS</h4>".format(week)
+    html = "<br><br><h3>LOTW: WEEK {} STANDINGS</h3>".format(week)
     # adjust header for playoff rounds
     if week == 19:
-        html = "<br><br><h4>LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h4>\n".format(week)
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n".format(week)
     elif week == 20:
-        html = "<br><br><h4>LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h4>\n".format(week)
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n".format(week)
     elif week == 21:
-        html = "<br><br><h4>LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h4>\n".format(week)
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n".format(week)
     elif week == 22:
-        html = "<br><br><h4>LOTW: WEEK {} STANDINGS (SUPER BOWL)</h4>\n".format(week)
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n".format(week)
 
     html += """
 <table>
@@ -248,6 +248,8 @@ def lambda_handler(event, context):
 
     # get current standings
     standings = get_standings(conn)
+    total_players_season = len(standings)
+    current_year = get_current_year()
 
     # get standings commish message
     if standings_week == 0:
@@ -286,11 +288,50 @@ def lambda_handler(event, context):
 
         # build message body
         #message = "<body>\n<p>Hi {},<br><br>".format(first_name)
-        message = "<body>\n";
+        message = "<br>"
+
+        # include pick report after week 1
+        if standings_week > 1 or request_type == "test":
+            logger.info("Building pick report for player {}".format(player_id))
+            message = message + "<br><h3>Your picks:</h3>\n"
+
+            # Get Current Season Details
+            weekly_data, season_fav, season_dog, season_pickem = get_player_season_details(conn, player_id, current_year)
+
+            # Find Rank and Record from current standings
+            season_wins = 0
+            season_losses = 0
+            rank = "-"
+
+            # Standings tuple: (id, last, first, titles, rookie, wins, losses, win_pct, ats, streak)
+            # We iterate to find the player and their index (rank)
+            for i, row in enumerate(standings):
+                if row[0] == player_id:
+                    rank = i + 1
+                    season_wins = row[5]
+                    season_losses = row[6]
+                    break
+
+            season_total = season_wins + season_losses
+            season_pct = (season_wins / season_total * 100) if season_total > 0 else 0.0
+
+            #message += "<h3>{} Season Performance</h3>".format(current_year)
+            message += "<b>Record:</b> {}-{} ({:.1f}%)<br>".format(season_wins, season_losses, season_pct)
+            message += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
+            message += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
+
+            # Updated table headers and row to include Game Result
+            message += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Site</th><th>Type</th><th>Result</th></tr>"
+            for row in weekly_data:
+                res_class = "win" if row['result'] == "Win" else ("loss" if (row['result'] == "Loss" or row['result'] == "Loss (Push)") else "")
+                message += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
+                    row['week'], row['pick'], row['game_result'], row['site'], row['type'], res_class, row['result']
+                )
+            message += "</table><br>\n"
 
         # build email body for this player
         standings_html = get_standings_html(conn, standings_week, standings, player_id)
-        mail_body = build_html_head() + message + commish_message + standings_html + "<br></body></html>"
+        mail_body = build_html_head() + "\n<body>\n" + commish_message + message + standings_html + "<br></body></html>"
         mail_to = (player_email, 'bmoney312@gmail.com')
         mail_subject = "lotw: week {} standings".format(standings_week)
 

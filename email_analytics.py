@@ -8,6 +8,7 @@ import boto3
 from time import sleep
 from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name, get_standings_full_name
 from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line, build_html
+from lotw import get_player_season_details
 
 # global variables
 logger = logging.getLogger()
@@ -135,70 +136,6 @@ def get_game_result_string(conn, pick_team_id, week, year):
                 return "{} {} v {} {}".format(away, a_score, home, h_score)
 
     return "-"
-
-def get_player_season_details(conn, player_id, year):
-    """
-    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
-    Appends the spread to the pick name.
-    """
-    picks_table = "Picks_{}".format(year)
-
-    with conn.cursor() as cur:
-        sql = """
-            SELECT week, pick, pick_ats
-            FROM {}
-            WHERE player_id = %s
-            AND lock_in_time IS NOT NULL
-            AND lock_in_time <= CURRENT_TIMESTAMP
-            ORDER BY week ASC
-        """.format(picks_table)
-        cur.execute(sql, (player_id,))
-        rows = cur.fetchall()
-
-    weekly_data = []
-    fav_count = 0
-    dog_count = 0
-    pickem_count = 0
-
-    for row in rows:
-        week, pick, pick_ats = row
-
-        # Get Classification, Line, and Site
-        classification, line, site = get_pick_details(conn, pick, week, year)
-
-        # Get Game Result String
-        game_result = get_game_result_string(conn, pick, week, year)
-
-        if classification == "Favorite":
-            fav_count += 1
-        elif classification == "Underdog":
-            dog_count += 1
-        elif classification == "Pick'em":
-            pickem_count += 1
-
-        # Format Pick String with Line (e.g., "DEN -3")
-        if line is not None:
-            pick_display = "{} {}".format(pick, formatted_line(line))
-        else:
-            pick_display = pick
-
-        # Format Result
-        result_str = "-"
-        if pick_ats is not None:
-            if pick_ats > 0: result_str = "Win"
-            elif pick_ats < 0: result_str = "Loss"
-            else: result_str = "Loss (Push)"
-
-        weekly_data.append({
-            'week': week,
-            'pick': pick_display, # Use formatted string
-            'game_result': game_result, # Added field
-            'site': site if site else "-",
-            'result': result_str,
-            'type': classification if classification else "-"
-        })
-
-    return weekly_data, fav_count, dog_count, pickem_count
 
 def get_player_career_stats(conn, player_id, start_year, end_year):
     """
@@ -560,7 +497,7 @@ def lambda_handler(event, context):
     if current_week is None:
         current_week = get_current_week(conn)
     else:
-        current_week = int(week)
+        current_week = int(current_week)
 
     if current_week is None:
         logger.error("ERROR: Unable to determine current week!")
