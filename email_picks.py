@@ -315,16 +315,25 @@ def lambda_handler(event, context):
         logger.info("Starting with player_id {}".format(start_with_player_id))
 
     # determine current week
+<<<<<<< HEAD
     week = os.environ.get('week')
 
     if week is None:
         week = get_current_week(conn)
     else:
         week = int(week)
+=======
+    week = get_current_week(conn)
+>>>>>>> origin/main
 
     if week is None:
         logger.error("ERROR: Unable to determine current week!")
         sys.exit()
+<<<<<<< HEAD
+=======
+    else:
+        week = int(week)
+>>>>>>> origin/main
 
     send_pick_summary = os.environ.get('send_pick_summary')
     if send_pick_summary is not None:
