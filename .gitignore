@@ -5,6 +5,7 @@ _cffi_backend.cpython-36m-x86_64-linux-gnu.so
 cryptography/hazmat/bindings/_padding.abi3.so
 cryptography/hazmat/bindings/_constant_time.abi3.so
 cryptography/hazmat/bindings/_openssl.abi3.so
+.libs_cffi_backend/libffi-d78936b1.so.6.0.4
 
 # Virtual environments
 venv/
@@ -12,4 +13,7 @@ venv/
 
 # MacOS system files
 .DS_Store
+
+# swap files
+*.py.swp
 
