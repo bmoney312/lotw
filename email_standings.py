@@ -1,0 +1,411 @@
+import os
+import sys
+import json
+import pymysql
+import logging
+import datetime
+import boto3
+from time import sleep
+from lotw import get_all_paid_players, get_player, get_standings, get_standings_full_name
+from lotw import get_current_week, get_current_pick, get_standings_message, get_current_year, get_player_season_details
+from lotw import build_html, formatted_line, response, build_html_head, smtp_send, smtp_connect
+
+# global variables
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+cloudwatch = boto3.client('cloudwatch')
+
+def get_standings_html(conn, week, standings, current_player_id):
+    """
+    Return string of LOTW standings in HTML table
+    """
+    html = "<br><br><h3>LOTW: WEEK {} STANDINGS</h3>".format(week)
+    # adjust header for playoff rounds
+    if week == 19:
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n".format(week)
+    elif week == 20:
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n".format(week)
+    elif week == 21:
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n".format(week)
+    elif week == 22:
+        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n".format(week)
+
+    html += """
+<table>
+<tr>
+    <th>Rank</th>
+    <th>Name</th>
+    <th>Wins</th>
+    <th>Losses</th>
+    <th>Win %</th>
+    <th>ATS Points</th>
+    <th>Streak</th>
+    <th>Week {} Pick</th>
+    <th>Week {} Result</th>
+</tr>
+""".format(week, week, week)
+
+    rank = 1
+    for row in standings:
+        (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
+        full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
+        (pick_id, pick, line, pick_ats, locked_in) = get_current_pick(conn, player_id, week)
+
+        # highlight row of current player
+        highlight_row = False
+        if player_id == current_player_id:
+            highlight_row = True
+
+        # set pick_ats for no picks
+        if pick == "NOP" and pick_ats is None:
+            pick_ats = 0
+            locked_in = True
+            pick_as_string = "NO PICK"
+        else:
+            pick_as_string = "{} {}".format(pick, formatted_line(line))
+
+        if pick_ats > 0:
+            pick_ats_as_string = "+{}".format(pick_ats)
+        else:
+            pick_ats_as_string = str(pick_ats)
+
+        if pick_ats is None:
+            logger.error("Unexpected NULL value for pick_ats player {} week {}".format(player_id, week))
+            sys.exit()
+
+        if pick_ats > 0:
+            result = "Win (<font color=green>{}</font>)".format(pick_ats_as_string)
+        else:
+            result = "Loss (<font color=red>{}</font>)".format(pick_ats_as_string)
+
+        if locked_in is not True:
+            logger.error("Unexpected value locked_in value {} for player {} when creating standings HTML string".format(locked_in, player_id))
+            sys.exit()
+
+        win_percentage_string = "{0:.3f}".format(win_percentage)
+
+        html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, streak, pick_as_string, result, highlight_row)
+        rank += 1 
+
+        # end for
+    html += "</table>"
+    html = html + "<br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
+    return html
+
+
+def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result, highlight_row):
+    """
+    Build HTML string of single row in standings
+    """
+    if highlight_row is True:
+        html = """
+<tr>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+<td><b>{}</b></td>
+</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
+    else:
+        html = """
+<tr>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+<td>{}</td>
+</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
+
+    return html
+
+def emit_emails_sent_metric(week, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'StandingsEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())},
+                        {'Name': 'Week', 'Value': str(week)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted StandingsEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
+
+
+def lambda_handler(event, context):
+    """
+    Email LOTW standings to each player each week
+    """
+
+    logger.info("Received event: " + json.dumps(event, indent=2))
+
+    request_type = event.get('detail-type')
+    if request_type is None:
+        logger.error("Unable to determine request type")
+        sys.exit()
+
+    db_endpoint = os.environ['db_endpoint']
+    db_port = int(os.environ['db_port'])
+    db_username = os.environ['db_username']
+    db_password = os.environ['db_password']
+    db_name = db=os.environ['db_name']
+
+    logger.info("Connecting to MySQL database {}".format(db_endpoint))
+
+    try:
+        conn = pymysql.connect(host=db_endpoint, port=db_port,
+                                user=db_username, passwd=db_password,
+                                db=db_name,connect_timeout=5)
+    except:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+        sys.exit()
+
+    logger.info("SUCCESS: Connection to MySQL database succeeded")
+    
+    # initialize variables
+    mail_username = os.environ['mail_username']
+    mail_password = os.environ['mail_password']
+    mail_host = os.environ['mail_host']
+    mail_port = os.environ['mail_port']
+    mail_from = '"Brendan Connell" <bmoney312@gmail.com>'
+
+    # --- Retry Configuration ---
+    try:
+        MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
+    except ValueError:
+        MAX_RETRIES = 5
+    
+    try:
+        RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
+    except ValueError:
+        RETRY_SLEEP_SECONDS = 15
+    # --- End Retry Configuration ---
+
+    # take single player_id as input if provided
+    player_id = os.environ.get('player_id')
+    start_with_player_id = os.environ.get('start_with_player_id')
+
+    if start_with_player_id:
+        start_with_player_id = int(start_with_player_id)
+        logger.info("Starting with player_id {}".format(start_with_player_id))
+
+    if request_type == "Scheduled Event":
+        players = get_all_paid_players(conn)
+    elif request_type == "manual_run":
+        if player_id is not None:
+            players = get_player(conn, int(player_id))
+        else:
+            players = get_all_paid_players(conn)
+    elif request_type == "test":
+        players = get_player(conn, int(1))
+    else:
+        logger.error("Invalid request type {}".format(request_type))
+        sys.exit()
+
+    logger.info("Request type is {}".format(request_type))
+    logger.debug("Players {}".format(players))
+
+    # week to compute standings, set to last week unless
+    # environment variable week set then use same week
+    standings_week = 0
+
+    # determine current week
+    week = os.environ.get('week')
+
+    # if week is not provided
+    if week is None:
+        week = get_current_week(conn)
+        if week is None:
+            logger.error("ERROR: Unable to determine current week!")
+            sys.exit()
+        standings_week = int(week) - 1
+    else:
+        standings_week = int(week)
+
+    logger.info("Current week set to {}".format(week))
+    logger.info("Standings week set to {}".format(standings_week))
+    logger.info("Current time is {}".format(datetime.datetime.now()))
+
+    # get current standings
+    standings = get_standings(conn)
+    total_players_season = len(standings)
+    current_year = get_current_year()
+
+    # get standings commish message
+    if standings_week == 0:
+        commish_message = 'Testing. Week 0 Standings.<br>'
+    else:
+        commish_message = get_standings_message(conn, standings_week)
+
+    if commish_message is None:
+        if request_type == "test":
+            commish_message = "Testing standings for week {}.<br>".format(standings_week)
+        else:
+            logger.error("Unexpected missing value for commish message")
+            sys.exit()
+
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
+    # connect to SMTP relay
+    smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
+
+    if smtp_relay is None:
+        logger.error("Error establishing SMTP connection with {}".format(mail_host))
+        sys.exit()
+
+    # email standings to each player
+    for player in players:
+        (player_id, player_email, last_name, first_name, titles, is_rookie) = player
+        logger.info("Working on player {} {} {} {}".format(player_id, first_name, last_name, player_email))
+
+        # skip players less than start_with_player_id
+        # if start_with_player_id provided
+        if start_with_player_id is not None and request_type != "test":
+            if player_id < start_with_player_id:
+                logger.info("Skipping player {} which is less than start_with_player_id {}".format(player_id, start_with_player_id))
+                continue
+
+        # build message body
+        #message = "<body>\n<p>Hi {},<br><br>".format(first_name)
+        message = "<br>"
+
+        # include pick report after week 1
+        if standings_week > 1 or request_type == "test":
+            logger.info("Building pick report for player {}".format(player_id))
+            message = message + "<br><h3>Your picks:</h3>\n"
+
+            # Get Current Season Details
+            weekly_data, season_fav, season_dog, season_pickem = get_player_season_details(conn, player_id, current_year)
+
+            # Find Rank and Record from current standings
+            season_wins = 0
+            season_losses = 0
+            rank = "-"
+
+            # Standings tuple: (id, last, first, titles, rookie, wins, losses, win_pct, ats, streak)
+            # We iterate to find the player and their index (rank)
+            for i, row in enumerate(standings):
+                if row[0] == player_id:
+                    rank = i + 1
+                    season_wins = row[5]
+                    season_losses = row[6]
+                    break
+
+            season_total = season_wins + season_losses
+            season_pct = (season_wins / season_total * 100) if season_total > 0 else 0.0
+
+            #message += "<h3>{} Season Performance</h3>".format(current_year)
+            message += "<b>Record:</b> {}-{} ({:.1f}%)<br>".format(season_wins, season_losses, season_pct)
+            message += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
+            message += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
+
+            # Updated table headers and row to include Game Result
+            message += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Site</th><th>Type</th><th>Result</th></tr>"
+            for row in weekly_data:
+                res_class = "win" if row['result'] == "Win" else ("loss" if (row['result'] == "Loss" or row['result'] == "Loss (Push)") else "")
+                message += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
+                    row['week'], row['pick'], row['game_result'], row['site'], row['type'], res_class, row['result']
+                )
+            message += "</table><br>\n"
+
+        # build email body for this player
+        standings_html = get_standings_html(conn, standings_week, standings, player_id)
+        mail_body = build_html_head() + "\n<body>\n" + commish_message + message + standings_html + "<br></body></html>"
+        mail_to = (player_email, 'bmoney312@gmail.com')
+        mail_subject = "lotw: week {} standings".format(standings_week)
+
+        # adjust subject for playoff rounds
+        if standings_week == 19:
+            mail_subject = "lotw: week {} standings (wildcard weekend)".format(standings_week)
+        elif standings_week == 20:
+            mail_subject = "lotw: week {} standings (divisional playoffs)".format(standings_week)
+        elif standings_week == 21:
+            mail_subject = "lotw: week {} standings (conference championships)".format(standings_week)
+        elif standings_week == 22:
+            mail_subject = "lotw: week {} standings (super bowl)".format(standings_week)
+
+        # --- Send email with retry logic ---
+        email_sent_successfully = False
+        for attempt in range(MAX_RETRIES):
+            email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
+            
+            if email_result is True:
+                logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
+                email_sent_successfully = True
+                emails_sent_count += 1
+                break # Exit retry loop on success
+            else:
+                logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
+                if attempt <= MAX_RETRIES:
+                    logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
+                    smtp_relay.close()
+                    sleep(RETRY_SLEEP_SECONDS)
+
+                    # Reconnect to SMTP relay
+                    smtp_relay = None
+                    smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
+
+                    if smtp_relay is None:
+                        logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
+                        break # Break retry loop if reconnect fails
+                else:
+                    logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
+
+        # If all retries failed, log and handle
+        if not email_sent_successfully:
+            logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
+            
+            if smtp_relay is None:
+                logger.error("SMTP connection is dead.")
+            else:
+                logger.info("Closing connection to SMTP relay.")
+                smtp_relay.close()
+
+            # email emails sent metric
+            emit_emails_sent_metric(standings_week, emails_sent_count)
+            
+            # close database connection
+            conn.close()
+
+            # return error if all players do not receive email
+            logger.info("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
+            raise RuntimeError("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
+            #return response(504, 'text/html', build_html("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES)))
+
+        # Gentle pacing
+        sleep(2)
+
+    # emit emails sent metric
+    emit_emails_sent_metric(standings_week, emails_sent_count)
+
+    # close database connection
+    conn.close()
+
+    # close SMTP connection
+    smtp_relay.close()
+
+    # return result
+    logger.info("Standings for week {} sent successfully.".format(standings_week))
+    return response(200, 'text/html', build_html("Standings for week {} sent successfully.".format(standings_week)))
+

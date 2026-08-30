@@ -1,0 +1,15 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+_cffi_backend.cpython-36m-x86_64-linux-gnu.so
+cryptography/hazmat/bindings/_padding.abi3.so
+cryptography/hazmat/bindings/_constant_time.abi3.so
+cryptography/hazmat/bindings/_openssl.abi3.so
+
+# Virtual environments
+venv/
+.env
+
+# MacOS system files
+.DS_Store
+
