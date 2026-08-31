@@ -15,6 +15,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
+
 def get_standings_html(conn, week, standings, current_player_id):
     """
     Return string of LOTW standings in HTML table
@@ -43,7 +44,7 @@ def get_standings_html(conn, week, standings, current_player_id):
     <th>Week {} Pick</th>
     <th>Week {} Result</th>
 </tr>
-""".format(week, week, week)
+""".format(week, week)
 
     rank = 1
     for row in standings:
@@ -85,7 +86,7 @@ def get_standings_html(conn, week, standings, current_player_id):
         win_percentage_string = "{0:.3f}".format(win_percentage)
 
         html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, streak, pick_as_string, result, highlight_row)
-        rank += 1 
+        rank += 1
 
         # end for
     html += "</table>"
@@ -125,6 +126,7 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 </tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
 
     return html
+
 
 def emit_emails_sent_metric(week, emails_sent_count):
     # Emit the metric emails_sent_count
@@ -168,20 +170,20 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
@@ -194,7 +196,7 @@ def lambda_handler(event, context):
         MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
     except ValueError:
         MAX_RETRIES = 5
-    
+
     try:
         RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
     except ValueError:
@@ -287,7 +289,7 @@ def lambda_handler(event, context):
                 continue
 
         # build message body
-        #message = "<body>\n<p>Hi {},<br><br>".format(first_name)
+        # message = "<body>\n<p>Hi {},<br><br>".format(first_name)
         message = "<br>"
 
         # include pick report after week 1
@@ -315,7 +317,7 @@ def lambda_handler(event, context):
             season_total = season_wins + season_losses
             season_pct = (season_wins / season_total * 100) if season_total > 0 else 0.0
 
-            #message += "<h3>{} Season Performance</h3>".format(current_year)
+            # message += "<h3>{} Season Performance</h3>".format(current_year)
             message += "<b>Record:</b> {}-{} ({:.1f}%)<br>".format(season_wins, season_losses, season_pct)
             message += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
             message += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
@@ -349,12 +351,12 @@ def lambda_handler(event, context):
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
-            
+
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
                 emails_sent_count += 1
-                break # Exit retry loop on success
+                break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
@@ -368,14 +370,14 @@ def lambda_handler(event, context):
 
                     if smtp_relay is None:
                         logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break # Break retry loop if reconnect fails
+                        break  # Break retry loop if reconnect fails
                 else:
                     logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
 
         # If all retries failed, log and handle
         if not email_sent_successfully:
             logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
-            
+
             if smtp_relay is None:
                 logger.error("SMTP connection is dead.")
             else:
@@ -384,14 +386,14 @@ def lambda_handler(event, context):
 
             # email emails sent metric
             emit_emails_sent_metric(standings_week, emails_sent_count)
-            
+
             # close database connection
             conn.close()
 
             # return error if all players do not receive email
             logger.info("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
             raise RuntimeError("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
-            #return response(504, 'text/html', build_html("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES)))
+            # return response(504, 'text/html', build_html("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
@@ -408,4 +410,3 @@ def lambda_handler(event, context):
     # return result
     logger.info("Standings for week {} sent successfully.".format(standings_week))
     return response(200, 'text/html', build_html("Standings for week {} sent successfully.".format(standings_week)))
-
