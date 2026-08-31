@@ -5,8 +5,8 @@ import pymysql
 import logging
 import datetime
 from lotw import update_game_ats, update_pick_ats, validate_field, get_current_year
-from lotw import get_all_player_picks, get_all_current_players, get_player, get_standings
-from lotw import get_current_week, build_html, response
+from lotw import get_all_player_picks, get_all_current_players, get_current_week
+from lotw import build_html, response
 
 # global variables
 logger = logging.getLogger()
@@ -17,8 +17,9 @@ def get_player_streak(conn, player_id, current_standings_week):
     """
     Calculate the player's current win/loss streak working backwards from the most recent week.
     """
+    # Return '-' for week 0
     if current_standings_week == 0:
-        return "-" # Return '-' for week 0
+        return "-"
 
     try:
         # get_all_player_picks returns list of (week, pick, pick_ats)
@@ -28,7 +29,7 @@ def get_player_streak(conn, player_id, current_standings_week):
         picks_map = {week: ats for week, pick, ats in all_picks if ats is not None and week <= current_standings_week}
 
         streak_count = 0
-        streak_type = None # 'W' or 'L'
+        streak_type = None  # 'W' or 'L'
 
         # Iterate backwards from the most recent week
         for week in range(current_standings_week, 0, -1):
@@ -48,20 +49,23 @@ def get_player_streak(conn, player_id, current_standings_week):
                 # The streak is broken
                 break
 
+        # No graded picks found
         if streak_type is None:
-            return "-" # No graded picks found
+            return "-"
 
-        return "{}{}".format(streak_type, streak_count) # e.g., "W3" or "L1"
+        # e.g., "W3" or "L1"
+        return "{}{}".format(streak_type, streak_count)
 
     except Exception as e:
         logger.error("Error calculating streak for player {}: {}".format(player_id, str(e)))
         return "?"
 
+
 def update_standings_table(conn, week):
     """
     Update Standings table based on picks thru and including week provided
-    
-    For each player in Players table, compute wins / losses / win% / 
+
+    For each player in Players table, compute wins / losses / win% /
     ATS for [week] and update Standings
 
     returns nothing
@@ -85,7 +89,7 @@ def update_standings_table(conn, week):
             total_picks = len(player_picks)
         else:
             total_picks = 0
-        
+
         player_wins = 0
         player_losses = 0
         player_ats = 0
@@ -130,14 +134,13 @@ def update_standings_table(conn, week):
                     sql = "UPDATE `Standings_" + str(get_current_year()) + "` SET `wins`=%s, `losses`=%s, `win_percentage`=%s, `ats_points`=%s, `streak`=%s WHERE `player_id` = %s"
                     cur.execute(sql, (player_wins, player_losses, player_win_percentage, player_ats, streak_string, player_id))
 
-                logger.debug("update_standings_table(): ".format(sql))
+                logger.debug("update_standings_table(): {}".format(sql))
                 conn.commit()
         except Exception as e:
             logger.error("Error updating database: {}".format(str(e)))
             raise
 
         logger.debug("Updated standings table for player {}".format(player_id))
-
 
 
 def lambda_handler(event, context):
@@ -156,29 +159,26 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     if request_type == "Scheduled Event":
         logger.debug("Scheduled Event")
-        #players = get_all_current_players(conn)
     elif request_type == "test":
         logger.debug("test")
-        #players = get_player(conn, int(1))
     elif request_type == "manual_run":
         logger.debug("manual_run")
-        #players = get_all_current_players(conn)
     else:
         logger.error("Invalid request type {}".format(request_type))
         sys.exit()
@@ -229,4 +229,3 @@ def lambda_handler(event, context):
 
     # return result
     return response(200, 'text/html', build_html("Standings for week {} updated successfully.".format(standings_week)))
-
