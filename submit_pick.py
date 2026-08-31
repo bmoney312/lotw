@@ -14,7 +14,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-
 def get_button_html(week, player_id, pick):
     """
     print <button> and <form> html for submit and cancel buttons
@@ -38,7 +37,6 @@ def get_button_html(week, player_id, pick):
     return html
 
 
-
 def lambda_handler(event, context):
     """
     submit_pick.py
@@ -52,23 +50,21 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     # read body of request
-    #params = event;
-    #query_string = json.loads(event['queryStringParameters'])
     query_string_params = event.get('queryStringParameters')
 
     if query_string_params is not None:
@@ -149,11 +145,11 @@ def lambda_handler(event, context):
         message += "please confirm your week {} pick <b>{} {}</b></h5>".format(week, pick, formatted_line(line))
         message += get_button_html(week, player_id, pick)
     else:
-        printable_line = formatted_line(current_line)
-        #message += "your week {} pick is <b>{} {}</b>. ".format(week, current_pick, printable_line)
+        # printable_line = formatted_line(current_line)
+        # message += "your week {} pick is <b>{} {}</b>. ".format(week, current_pick, printable_line)
         if pick == current_pick:
             logger.info("confirm pick {} for player {} no change from {}".format(pick, player_id, current_pick))
-            message += "please confirm your week {} pick <b>{} {}</b></h5>".format(week, pick, formatted_line(line)) 
+            message += "please confirm your week {} pick <b>{} {}</b></h5>".format(week, pick, formatted_line(line))
         else:
             logger.info("confirm pick change to {} for player {} changed from {}".format(pick, player_id, current_pick))
             message += "please confirm your pick change to <b>{} {}</b></h5>".format(pick, formatted_line(line))
@@ -166,4 +162,3 @@ def lambda_handler(event, context):
 
     # return result
     return response(200, 'text/html', html)
-
