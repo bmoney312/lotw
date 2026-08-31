@@ -1,7 +1,7 @@
-import os
-import sys
-import json
-import pymysql
+# import os
+# import sys
+# import json
+# import pymysql
 import logging
 import datetime
 from dateutil import tz
@@ -13,7 +13,8 @@ import random
 
 # global variables
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
 
 def response(status, content_type, response_body, cors=False):
     """
@@ -47,7 +48,6 @@ def response(status, content_type, response_body, cors=False):
     return messageData
 
 
-
 def build_html_head():
     """
     Build lines html head
@@ -75,7 +75,7 @@ h1 {
 h2 {
     font-size: 2.25rem;
 }
-  
+
 h3 {
     font-size: 2rem;
 }
@@ -149,7 +149,6 @@ h6 {
     return html
 
 
-
 def build_html_response(message):
     html = build_html_head()
     html += "<body>"
@@ -166,19 +165,18 @@ def build_html_message(message):
     return html
 
 
-
 def get_current_pick(conn, player_id, week):
     """
     Given a database connection object, player_id and week, return current pick.
-    Note that players can have multiple recorded picks per week so latest pick 
+    Note that players can have multiple recorded picks per week so latest pick
     is always current which has lock_in_time of not NULL.
-    
+
     Value of NULL in database for pick is equivalent to None in Python.
-    
-    Returns tuple with (pick_id, pick, line, pick_ats, locked_in) locked_in is boolean 
-    value showing if pick is locked in (current time after kickoff time).  If picked 
+
+    Returns tuple with (pick_id, pick, line, pick_ats, locked_in) locked_in is boolean
+    value showing if pick is locked in (current time after kickoff time).  If picked
     is locked, return true if not return false.
-    
+
     Example: (000001, DET, 3, None, True)       # pick is locked in but result not recorded
     Example: (000001, DET, 3, -12, True)        # pick is locked in and result recorded
     Example: (000001, None, None, None, False)  # no pick
@@ -227,12 +225,12 @@ def get_line(conn, team_id, week):
         cur.execute(select_statement, (team_id, week))
         row = cur.fetchone()
         if row is not None:
-            (home_team_line,away_team_id) = row
+            (home_team_line, away_team_id) = row
             if home_team_line is not None:
                 away_team_line = -home_team_line
             else:
                 away_team_line = None
-            return away_team_line 
+            return away_team_line
 
         select_statement = "SELECT `home_team_line`, `home_team_id` FROM Games_" + str(get_current_year()) + " WHERE `home_team_id`=%s and `week`=%s"
         logger.debug("get_line(): checking for home game for team {} week {}".format(team_id, week))
@@ -240,13 +238,12 @@ def get_line(conn, team_id, week):
         cur.execute(select_statement, (team_id, week))
         row = cur.fetchone()
         if row is not None:
-            (home_team_line,home_team_id) = row
+            (home_team_line, home_team_id) = row
             return home_team_line
 
         logger.debug("get_line(): No game found for team {} week {}".format(team_id, week))
         return None
-        #raise ValueError("No game found for team {} week {}".format(team_id, week))
-
+        # raise ValueError("No game found for team {} week {}".format(team_id, week))
 
 
 def get_kickoff_time(conn, team_id, week):
@@ -281,9 +278,11 @@ def validate_key(d, key):
 
     try:
         value = d[key]
+        logger.debug("found value {} for key {}".format(str(value), str(key)))
     except KeyError:
         return False
-    except:
+    except Exception as e:
+        logger.error("ERROR: {}".format(str(e)))
         raise
 
     return True
@@ -322,7 +321,7 @@ def formatted_line(line):
         printed_line = "+{}".format(line)
 
     return printed_line
-    
+
 
 def build_html(body):
     html = "<html><body>"
@@ -350,19 +349,20 @@ def smtp_connect(host, port, username, password):
     return server
 
 
-def smtp_send(smtp_relay, subject, body, mail_to, mail_from, reply_to = None):
+def smtp_send(smtp_relay, subject, body, mail_to, mail_from, reply_to=None):
     """
     Given smtplib.SMTP server obj, subject, body, mail_to, mail_from, reply_to as strings
     Send email
     """
-    if reply_to is None: reply_to = 'bmoney312@gmail.com'
+    if reply_to is None:
+        reply_to = 'bmoney312@gmail.com'
 
     msg = email.message.Message()
     msg['Subject'] = subject
     msg['From'] = mail_from
     msg['To'] = ', '.join(mail_to)
     msg['Reply-To'] = reply_to
-    msg.add_header('Content-Type','text/html')
+    msg.add_header('Content-Type', 'text/html')
     msg.set_payload(body)
 
     try:
@@ -374,19 +374,22 @@ def smtp_send(smtp_relay, subject, body, mail_to, mail_from, reply_to = None):
     return True
 
 
-def send_email(host, port, username, password, subject, body, mail_to, mail_from = None, reply_to = None):
+def send_email(host, port, username, password, subject, body, mail_to, mail_from=None, reply_to=None):
     """
     Send verification email to player who submitted pick
     """
-    if mail_from is None: mail_from = username
-    if reply_to is None: reply_to = mail_from
+    if mail_from is None:
+        mail_from = username
+
+    if reply_to is None:
+        reply_to = mail_from
 
     msg = email.message.Message()
     msg['Subject'] = subject
     msg['From'] = mail_from
     msg['To'] = ', '.join(mail_to)
     msg['Reply-To'] = reply_to
-    msg.add_header('Content-Type','text/html')
+    msg.add_header('Content-Type', 'text/html')
     msg.set_payload(body)
 
     try:
@@ -433,6 +436,7 @@ def get_all_current_players(conn):
         result = cur.fetchall()
         return result
 
+
 def get_all_paid_players(conn):
     """
     Return all rows in LOTW Players database
@@ -445,6 +449,7 @@ def get_all_paid_players(conn):
         result = cur.fetchall()
         return result
 
+
 def get_all_players(conn):
     """
     Return all rows in LOTW Players database and current year's registration status
@@ -455,6 +460,7 @@ def get_all_players(conn):
         cur.execute(select_statement)
         result = cur.fetchall()
         return result
+
 
 def get_past_registered_players(conn, year):
     """
@@ -473,9 +479,10 @@ def get_past_registered_players(conn, year):
         result = cur.fetchall()
         return result
 
+
 def get_player_reg(conn, player_id):
     """
-    Return row of one player in LOTW Players database including 
+    Return row of one player in LOTW Players database including
     current year's registration status
     """
 
@@ -497,7 +504,6 @@ def get_player(conn, player_id):
         cur.execute(select_statement, (player_id,))
         result = cur.fetchall()
         return result
-
 
 
 def get_player_by_email(conn, email):
@@ -529,8 +535,8 @@ def get_current_year():
 
 def get_current_week(conn):
     """
-    Determine current week, return week as integer, 
-    return None if week cannot be determined 
+    Determine current week, return week as integer,
+    return None if week cannot be determined
     """
 
     time_now = datetime.datetime.now()
@@ -553,12 +559,11 @@ def get_current_week(conn):
     offset_seconds = time_now.second
     offset_microseconds = time_now.microsecond
 
-    week_start_et = time_now - datetime.timedelta(days=offset_days, 
-                                                hours=offset_hours,
-                                                minutes=offset_minutes,
-                                                seconds=offset_seconds,
-                                                microseconds=offset_microseconds)
-
+    week_start_et = time_now - datetime.timedelta(days=offset_days,
+                                                  hours=offset_hours,
+                                                  minutes=offset_minutes,
+                                                  seconds=offset_seconds,
+                                                  microseconds=offset_microseconds)
 
     # +4 to account for US/Eastern vs UTC timezone
     week_start = week_start_et + datetime.timedelta(hours=4)
@@ -585,6 +590,7 @@ def get_current_week(conn):
 
     return None
 
+
 def in_daylight_savings():
     """
     Return True if current time is in daylight savings time window
@@ -602,10 +608,10 @@ def in_daylight_savings():
 
 def datetime_to_string(dt):
     """
-    Given a datetime object stored in UTC, return a nicely formatted 
+    Given a datetime object stored in UTC, return a nicely formatted
     string representation of the date/time in US/Eastern time.
 
-    DAY MM/DD HH:MM a/p 
+    DAY MM/DD HH:MM a/p
     """
 
     # convert datetime object from UTC to US/Eastern time
@@ -642,7 +648,6 @@ def check_auth_token(conn, token, player_id, week):
         return (False, "invalid token")
 
 
-
 def get_auth_token(conn, player_id, week):
     """
     get authentication token for player / week combination
@@ -677,7 +682,7 @@ def create_auth_token(conn, player_id, week):
     try:
         with conn.cursor() as cur:
             sql = "INSERT INTO `Auth_Tokens` (`token`, `player_id`, `week`, `expiration_time`) VALUES (%s, %s, %s, %s)"
-            logger.debug("create_auth_token(): ".format(sql))
+            logger.debug("create_auth_token(): {}".format(sql))
             cur.execute(sql, (new_token, player_id, week, expiration_time))
             conn.commit()
     except Exception as e:
@@ -757,7 +762,7 @@ def update_game_ats(conn, week):
 
     if week == 0:
         logger.info("No updates made for week 0")
-        return(True, "No updates made for week 0")
+        return (True, "No updates made for week 0")
 
     all_games = get_all_games(conn, week)
     for row in all_games:
@@ -776,17 +781,16 @@ def update_game_ats(conn, week):
         try:
             with conn.cursor() as cur:
                 sql = "UPDATE `Games_" + str(get_current_year()) + "` SET `away_team_ats` = %s, `home_team_ats` = %s WHERE `game_id` = %s"
-                logger.debug("update_game_ats(): ".format(sql))
+                logger.debug("update_game_ats(): {}".format(sql))
                 cur.execute(sql, (away_ats, home_ats, game_id))
                 conn.commit()
         except Exception as e:
             logger.error("Error updating database: {}".format(str(e)))
             raise
 
-        logger.info("Successfully updated home and away ATS values for game {}".format(game_id)) 
+        logger.info("Successfully updated home and away ATS values for game {}".format(game_id))
 
     return (True, "Successfully updated game ATS values for week {}".format(week))
-
 
 
 def update_pick_ats(conn, week):
@@ -810,7 +814,7 @@ def update_pick_ats(conn, week):
             return (False, error_msg)
 
     with conn.cursor() as cur:
-        select_statement = "SELECT `pick_id`, `pick` FROM `Picks_" + str(get_current_year()) + "` WHERE `lock_in_time` IS NOT NULL AND `week` = %s" # AND `pick_ats` IS NULL"
+        select_statement = "SELECT `pick_id`, `pick` FROM `Picks_" + str(get_current_year()) + "` WHERE `lock_in_time` IS NOT NULL AND `week` = %s"  # AND `pick_ats` IS NULL"
         cur.execute(select_statement, (week, ))
         valid_picks = cur.fetchall()
 
@@ -849,17 +853,16 @@ def update_pick_ats(conn, week):
             try:
                 with conn.cursor() as cur:
                     sql = "UPDATE `Picks_" + str(get_current_year()) + "` SET `pick_ats` = %s WHERE `pick_id` = %s"
-                    logger.debug("update_pick_ats(): ".format(sql))
+                    logger.debug("update_pick_ats(): {}".format(sql))
                     cur.execute(sql, (pick_ats, pick_id))
                     conn.commit()
             except Exception as e:
                 logger.error("Error updating database: {}".format(str(e)))
                 raise
 
-            logger.info("Successfully updated ATS value for pick {}".format(pick_id)) 
+            logger.info("Successfully updated ATS value for pick {}".format(pick_id))
 
     return (True, "Successfully updated pick ATS values for week {}".format(week))
-
 
 
 def get_standings_message(conn, week):
@@ -904,7 +907,6 @@ def get_all_player_picks(conn, player_id, week):
         return result
 
 
-
 def get_all_picks(conn, week):
     """
     For given week get all valid picks
@@ -919,7 +921,6 @@ def get_all_picks(conn, week):
         return result
 
 
-
 def get_standings(conn):
     """
     Return LOTW standings with player names and attributes
@@ -930,10 +931,10 @@ def get_standings(conn):
 
     with conn.cursor() as cur:
         select_statement = "SELECT Standings_" + str(get_current_year()) + ".player_id, `last_name`, `first_name`, `past_titles`, `rookie`, `wins`, `losses`, `win_percentage`, `ats_points`, `streak` FROM Standings_" + str(get_current_year()) + " INNER JOIN Players ON Standings_" + str(get_current_year()) + ".player_id = Players.player_id ORDER BY win_percentage DESC, ats_points DESC, last_name ASC, first_name ASC"
-        logger.debug("get_standings(): ".format(select_statement))
+        logger.debug("get_standings(): {}".format(select_statement))
         cur.execute(select_statement)
         rows = cur.fetchall()
-        return rows        
+        return rows
 
 
 def get_standings_full_name(first_name, last_name, past_titles, rookie):
@@ -1056,22 +1057,21 @@ p {
     return html
 
 
-
-#def build_lines_html_body(conn, player_id, week):
+# def build_lines_html_body(conn, player_id, week):
 #    """
 #    Given database connection and current week, return body of
 #    LOTW line email without the html/body tags
 #    """
 #    html = "<h4>LOTW: WEEK {} LINES</h4>\n".format(week)
 #    html = html + """
-#<table>
-#<tr>
+# <table>
+# <tr>
 #    <th>Kickoff Time</th>
 #    <th>Away Team</th>
 #    <th>Home Team</th>
 #    <th>Line</th>
-#</tr>
-#"""
+# </tr>
+# """
 #
 #    # read games for week and populate table
 #    with conn.cursor() as cur:
@@ -1083,7 +1083,7 @@ p {
 #            logger.debug("build_lines_html_body(): processing row {} {} {} {}".format(kickoff_time, away_team_id, home_team_id, home_team_line))
 #            html_row = build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line)
 #            html = html + html_row
-#    
+#
 #    html = html + "</table></body></html>"
 #    return html
 
@@ -1205,20 +1205,20 @@ def get_player_season_details(conn, player_id, year):
         # Format Result
         result_str = "-"
         if pick_ats is not None:
-            if pick_ats > 0: result_str = "Win"
-            elif pick_ats < 0: result_str = "Loss"
-            else: result_str = "Loss (Push)"
+            if pick_ats > 0:
+                result_str = "Win"
+            elif pick_ats < 0:
+                result_str = "Loss"
+            else:
+                result_str = "Loss (Push)"
 
         weekly_data.append({
             'week': week,
-            'pick': pick_display, # Use formatted string
-            'game_result': game_result, # Added field
+            'pick': pick_display,  # Use formatted string
+            'game_result': game_result,  # Added field
             'site': site if site else "-",
             'result': result_str,
             'type': classification if classification else "-"
         })
 
     return weekly_data, fav_count, dog_count, pickem_count
-
-
-
