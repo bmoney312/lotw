@@ -1,12 +1,13 @@
 #
 # DEPRECATED: implementation for ffi.verify()
 #
-import sys, imp
+import sys
 from . import model
 from .error import VerificationError
+from . import _imp_emulation as imp
 
 
-class VCPythonEngine(object):
+class VCPythonEngine:
     _class_key = 'x'
     _gen_python_module = True
 
@@ -101,8 +102,6 @@ class VCPythonEngine(object):
         # standard init.
         modname = self.verifier.get_module_name()
         constants = self._chained_list_constants[False]
-        prnt('#if PY_MAJOR_VERSION >= 3')
-        prnt()
         prnt('static struct PyModuleDef _cffi_module_def = {')
         prnt('  PyModuleDef_HEAD_INIT,')
         prnt('  "%s",' % modname)
@@ -123,24 +122,12 @@ class VCPythonEngine(object):
         prnt('    Py_DECREF(lib);')
         prnt('    return NULL;')
         prnt('  }')
+        prnt('#if Py_GIL_DISABLED')
+        prnt('  PyUnstable_Module_SetGIL(lib, Py_MOD_GIL_NOT_USED);')
+        prnt('#endif')
         prnt('  return lib;')
         prnt('}')
         prnt()
-        prnt('#else')
-        prnt()
-        prnt('PyMODINIT_FUNC')
-        prnt('init%s(void)' % modname)
-        prnt('{')
-        prnt('  PyObject *lib;')
-        prnt('  lib = Py_InitModule("%s", _cffi_methods);' % modname)
-        prnt('  if (lib == NULL)')
-        prnt('    return;')
-        prnt('  if (%s < 0 || _cffi_init() < 0)' % (constants,))
-        prnt('    return;')
-        prnt('  return;')
-        prnt('}')
-        prnt()
-        prnt('#endif')
 
     def load_library(self, flags=None):
         # XXX review all usages of 'self' here!
@@ -179,7 +166,7 @@ class VCPythonEngine(object):
         # it will invoke the chained list of functions that will really
         # build (notably) the constant objects, as <cdata> if they are
         # pointers, and store them as attributes on the 'library' object.
-        class FFILibrary(object):
+        class FFILibrary:
             _cffi_python_module = module
             _cffi_ffi = self.ffi
             _cffi_dir = []
@@ -245,6 +232,9 @@ class VCPythonEngine(object):
             if tp.is_integer_type() and tp.name != '_Bool':
                 converter = '_cffi_to_c_int'
                 extraarg = ', %s' % tp.name
+            elif tp.is_complex_type():
+                raise VerificationError(
+                    "not implemented in verify(): complex types")
             else:
                 converter = '(%s)_cffi_to_c_%s' % (tp.get_c_name(''),
                                                    tp.name.replace(' ', '_'))
@@ -275,22 +265,23 @@ class VCPythonEngine(object):
             tovar, tp.get_c_name(''), errvalue))
         self._prnt('    %s;' % errcode)
 
-    def _extra_local_variables(self, tp, localvars):
+    def _extra_local_variables(self, tp, localvars, freelines):
         if isinstance(tp, model.PointerType):
             localvars.add('Py_ssize_t datasize')
+            localvars.add('struct _cffi_freeme_s *large_args_free = NULL')
+            freelines.add('if (large_args_free != NULL)'
+                          ' _cffi_free_array_arguments(large_args_free);')
 
     def _convert_funcarg_to_c_ptr_or_array(self, tp, fromvar, tovar, errcode):
         self._prnt('  datasize = _cffi_prepare_pointer_call_argument(')
         self._prnt('      _cffi_type(%d), %s, (char **)&%s);' % (
             self._gettypenum(tp), fromvar, tovar))
         self._prnt('  if (datasize != 0) {')
-        self._prnt('    if (datasize < 0)')
-        self._prnt('      %s;' % errcode)
-        self._prnt('    %s = alloca((size_t)datasize);' % (tovar,))
-        self._prnt('    memset((void *)%s, 0, (size_t)datasize);' % (tovar,))
-        self._prnt('    if (_cffi_convert_array_from_object('
-                   '(char *)%s, _cffi_type(%d), %s) < 0)' % (
-            tovar, self._gettypenum(tp), fromvar))
+        self._prnt('    %s = ((size_t)datasize) <= 640 ? '
+                   'alloca((size_t)datasize) : NULL;' % (tovar,))
+        self._prnt('    if (_cffi_convert_array_argument(_cffi_type(%d), %s, '
+                   '(char **)&%s,' % (self._gettypenum(tp), fromvar, tovar))
+        self._prnt('            datasize, &large_args_free) < 0)')
         self._prnt('      %s;' % errcode)
         self._prnt('  }')
 
@@ -369,15 +360,17 @@ class VCPythonEngine(object):
             prnt('  %s;' % type.get_c_name(' x%d' % i, context))
         #
         localvars = set()
+        freelines = set()
         for type in tp.args:
-            self._extra_local_variables(type, localvars)
-        for decl in localvars:
+            self._extra_local_variables(type, localvars, freelines)
+        for decl in sorted(localvars):
             prnt('  %s;' % (decl,))
         #
         if not isinstance(tp.result, model.VoidType):
             result_code = 'result = '
             context = 'result of %s' % name
             prnt('  %s;' % tp.result.get_c_name(' result', context))
+            prnt('  PyObject *pyresult;')
         else:
             result_code = ''
         #
@@ -409,9 +402,14 @@ class VCPythonEngine(object):
         if numargs == 0:
             prnt('  (void)noarg; /* unused */')
         if result_code:
-            prnt('  return %s;' %
+            prnt('  pyresult = %s;' %
                  self._convert_expr_from_c(tp.result, 'result', 'result type'))
+            for freeline in freelines:
+                prnt('  ' + freeline)
+            prnt('  return pyresult;')
         else:
+            for freeline in freelines:
+                prnt('  ' + freeline)
             prnt('  Py_INCREF(Py_None);')
             prnt('  return Py_None;')
         prnt('}')
@@ -754,7 +752,7 @@ class VCPythonEngine(object):
         if isinstance(tp, model.ArrayType):
             tp_ptr = model.PointerType(tp.item)
             self._generate_cpy_const(False, name, tp, vartp=tp_ptr,
-                                     size_too = (tp.length == '...'))
+                                     size_too = tp.length_is_unknown())
         else:
             tp_ptr = model.PointerType(tp)
             self._generate_cpy_const(False, name, tp_ptr, category='var')
@@ -766,7 +764,7 @@ class VCPythonEngine(object):
         value = getattr(library, name)
         if isinstance(tp, model.ArrayType):   # int a[5] is "constant" in the
                                               # sense that "a=..." is forbidden
-            if tp.length == '...':
+            if tp.length_is_unknown():
                 assert isinstance(value, tuple)
                 (value, size) = value
                 BItemType = self.ffi._get_cached_btype(tp.item)
@@ -847,28 +845,20 @@ cffimod_header = r'''
     typedef unsigned char _Bool;
 #  endif
 # endif
+# define _cffi_float_complex_t   _Fcomplex    /* include <complex.h> for it */
+# define _cffi_double_complex_t  _Dcomplex    /* include <complex.h> for it */
 #else
 # include <stdint.h>
 # if (defined (__SVR4) && defined (__sun)) || defined(_AIX) || defined(__hpux)
 #  include <alloca.h>
 # endif
-#endif
-
-#if PY_MAJOR_VERSION < 3
-# undef PyCapsule_CheckExact
-# undef PyCapsule_GetPointer
-# define PyCapsule_CheckExact(capsule) (PyCObject_Check(capsule))
-# define PyCapsule_GetPointer(capsule, name) \
-    (PyCObject_AsVoidPtr(capsule))
-#endif
-
-#if PY_MAJOR_VERSION >= 3
-# define PyInt_FromLong PyLong_FromLong
+# define _cffi_float_complex_t   float _Complex
+# define _cffi_double_complex_t  double _Complex
 #endif
 
 #define _cffi_from_c_double PyFloat_FromDouble
 #define _cffi_from_c_float PyFloat_FromDouble
-#define _cffi_from_c_long PyInt_FromLong
+#define _cffi_from_c_long PyLong_FromLong
 #define _cffi_from_c_ulong PyLong_FromUnsignedLong
 #define _cffi_from_c_longlong PyLong_FromLongLong
 #define _cffi_from_c_ulonglong PyLong_FromUnsignedLongLong
@@ -880,21 +870,21 @@ cffimod_header = r'''
 #define _cffi_from_c_int_const(x)                                        \
     (((x) > 0) ?                                                         \
         ((unsigned long long)(x) <= (unsigned long long)LONG_MAX) ?      \
-            PyInt_FromLong((long)(x)) :                                  \
+            PyLong_FromLong((long)(x)) :                                 \
             PyLong_FromUnsignedLongLong((unsigned long long)(x)) :       \
         ((long long)(x) >= (long long)LONG_MIN) ?                        \
-            PyInt_FromLong((long)(x)) :                                  \
+            PyLong_FromLong((long)(x)) :                                 \
             PyLong_FromLongLong((long long)(x)))
 
 #define _cffi_from_c_int(x, type)                                        \
     (((type)-1) > 0 ? /* unsigned */                                     \
         (sizeof(type) < sizeof(long) ?                                   \
-            PyInt_FromLong((long)x) :                                    \
+            PyLong_FromLong((long)x) :                                   \
          sizeof(type) == sizeof(long) ?                                  \
             PyLong_FromUnsignedLong((unsigned long)x) :                  \
             PyLong_FromUnsignedLongLong((unsigned long long)x)) :        \
         (sizeof(type) <= sizeof(long) ?                                  \
-            PyInt_FromLong((long)x) :                                    \
+            PyLong_FromLong((long)x) :                                   \
             PyLong_FromLongLong((long long)x)))
 
 #define _cffi_to_c_int(o, type)                                          \
@@ -979,6 +969,59 @@ static PyObject *_cffi_setup(PyObject *self, PyObject *args)
     if (_cffi_setup_custom(library) < 0)
         return NULL;
     return PyBool_FromLong(was_alive);
+}
+
+union _cffi_union_alignment_u {
+    unsigned char m_char;
+    unsigned short m_short;
+    unsigned int m_int;
+    unsigned long m_long;
+    unsigned long long m_longlong;
+    float m_float;
+    double m_double;
+    long double m_longdouble;
+};
+
+struct _cffi_freeme_s {
+    struct _cffi_freeme_s *next;
+    union _cffi_union_alignment_u alignment;
+};
+
+#ifdef __GNUC__
+  __attribute__((unused))
+#endif
+static int _cffi_convert_array_argument(CTypeDescrObject *ctptr, PyObject *arg,
+                                        char **output_data, Py_ssize_t datasize,
+                                        struct _cffi_freeme_s **freeme)
+{
+    char *p;
+    if (datasize < 0)
+        return -1;
+
+    p = *output_data;
+    if (p == NULL) {
+        struct _cffi_freeme_s *fp = (struct _cffi_freeme_s *)PyObject_Malloc(
+            offsetof(struct _cffi_freeme_s, alignment) + (size_t)datasize);
+        if (fp == NULL)
+            return -1;
+        fp->next = *freeme;
+        *freeme = fp;
+        p = *output_data = (char *)&fp->alignment;
+    }
+    memset((void *)p, 0, (size_t)datasize);
+    return _cffi_convert_array_from_object(p, ctptr, arg);
+}
+
+#ifdef __GNUC__
+  __attribute__((unused))
+#endif
+static void _cffi_free_array_arguments(struct _cffi_freeme_s *freeme)
+{
+    do {
+        void *p = (void *)freeme;
+        freeme = freeme->next;
+        PyObject_Free(p);
+    } while (freeme != NULL);
 }
 
 static int _cffi_init(void)

@@ -4,21 +4,16 @@ from .error import CDefError
 from . import model
 
 try:
-    callable
-except NameError:
-    # Python 3.1
-    from collections import Callable
-    callable = lambda x: isinstance(x, Callable)
-
-try:
     basestring
 except NameError:
     # Python 3.x
     basestring = str
 
+_unspecified = object()
 
 
-class FFI(object):
+
+class FFI:
     r'''
     The main top-level class that you instantiate once, or once per module.
 
@@ -96,18 +91,21 @@ class FFI(object):
             self.CData, self.CType = backend._get_types()
         self.buffer = backend.buffer
 
-    def cdef(self, csource, override=False, packed=False):
+    def cdef(self, csource, override=False, packed=False, pack=None):
         """Parse the given C source.  This registers all declared functions,
         types, and global variables.  The functions and global variables can
         then be accessed via either 'ffi.dlopen()' or 'ffi.verify()'.
         The types can be used in 'ffi.new()' and other functions.
         If 'packed' is specified as True, all structs declared inside this
         cdef are packed, i.e. laid out without any field alignment at all.
+        Alternatively, 'pack' can be a small integer, and requests for
+        alignment greater than that are ignored (pack=1 is equivalent to
+        packed=True).
         """
-        self._cdef(csource, override=override, packed=packed)
+        self._cdef(csource, override=override, packed=packed, pack=pack)
 
-    def embedding_api(self, csource, packed=False):
-        self._cdef(csource, packed=packed, dllexport=True)
+    def embedding_api(self, csource, packed=False, pack=None):
+        self._cdef(csource, packed=packed, pack=pack, dllexport=True)
         if self._embedding is None:
             self._embedding = ''
 
@@ -136,7 +134,11 @@ class FFI(object):
         linked to a particular library, just like C headers; in the
         library we only look for the actual (untyped) symbols.
         """
-        assert isinstance(name, basestring) or name is None
+        if not (isinstance(name, basestring) or
+                name is None or
+                isinstance(name, self.CData)):
+            raise TypeError("dlopen(name): name must be a file name, None, "
+                            "or an already-opened 'void *' handle")
         with self._lock:
             lib, function_cache = _make_ffi_library(self, name, flags)
             self._function_caches.append(function_cache)
@@ -338,15 +340,23 @@ class FFI(object):
    #    """
    #    note that 'buffer' is a type, set on this instance by __init__
 
-    def from_buffer(self, python_buffer):
-        """Return a <cdata 'char[]'> that points to the data of the
+    def from_buffer(self, cdecl, python_buffer=_unspecified,
+                    require_writable=False):
+        """Return a cdata of the given type pointing to the data of the
         given Python object, which must support the buffer interface.
         Note that this is not meant to be used on the built-in types
         str or unicode (you can build 'char[]' arrays explicitly)
         but only on objects containing large quantities of raw data
         in some other format, like 'array.array' or numpy arrays.
+
+        The first argument is optional and default to 'char[]'.
         """
-        return self._backend.from_buffer(self.BCharA, python_buffer)
+        if python_buffer is _unspecified:
+            cdecl, python_buffer = self.BCharA, cdecl
+        elif isinstance(cdecl, basestring):
+            cdecl = self._typeof(cdecl)
+        return self._backend.from_buffer(cdecl, python_buffer,
+                                         require_writable)
 
     def memmove(self, dest, src, n):
         """ffi.memmove(dest, src, n) copies n bytes of memory from src to dest.
@@ -397,7 +407,7 @@ class FFI(object):
         if (replace_with.startswith('*')
                 and '&[' in self._backend.getcname(cdecl, '&')):
             replace_with = '(%s)' % replace_with
-        elif replace_with and not replace_with[0] in '[(':
+        elif replace_with and replace_with[0] not in '[(':
             replace_with = ' ' + replace_with
         return self._backend.getcname(cdecl, replace_with)
 
@@ -526,6 +536,9 @@ class FFI(object):
     def from_handle(self, x):
         return self._backend.from_handle(x)
 
+    def release(self, x):
+        self._backend.release(x)
+
     def set_unicode(self, enabled_flag):
         """Windows: if 'enabled_flag' is True, enable the UNICODE and
         _UNICODE defines in C, and declare the types like TCHAR and LPTCSTR
@@ -576,7 +589,7 @@ class FFI(object):
             if sys.platform == "win32":
                 # we need 'libpypy-c.lib'.  Current distributions of
                 # pypy (>= 4.1) contain it as 'libs/python27.lib'.
-                pythonlib = "python27"
+                pythonlib = "python{0[0]}{0[1]}".format(sys.version_info)
                 if hasattr(sys, 'prefix'):
                     ensure('library_dirs', os.path.join(sys.prefix, 'libs'))
             else:
@@ -602,7 +615,7 @@ class FFI(object):
                 try:
                     import sysconfig
                 except ImportError:    # 2.6
-                    from distutils import sysconfig
+                    from cffi._shimmed_dist_utils import sysconfig
                 template = "python%d.%d"
                 if sysconfig.get_config_var('DEBUG_EXT'):
                     template += sysconfig.get_config_var('DEBUG_EXT')
@@ -627,8 +640,18 @@ class FFI(object):
         self._assigned_source = (str(module_name), source,
                                  source_extension, kwds)
 
+    def set_source_pkgconfig(self, module_name, pkgconfig_libs, source,
+                             source_extension='.c', **kwds):
+        from . import pkgconfig
+        if not isinstance(pkgconfig_libs, list):
+            raise TypeError("the pkgconfig_libs argument must be a list "
+                            "of package names")
+        kwds2 = pkgconfig.flags_from_pkgconfig(pkgconfig_libs)
+        pkgconfig.merge_flags(kwds, kwds2)
+        self.set_source(module_name, source, source_extension, **kwds)
+
     def distutils_extension(self, tmpdir='build', verbose=True):
-        from distutils.dir_util import mkpath
+        from cffi._shimmed_dist_utils import mkpath
         from .recompiler import recompile
         #
         if not hasattr(self, '_assigned_source'):
@@ -663,7 +686,8 @@ class FFI(object):
             raise TypeError("emit_c_code() is only for C extension modules, "
                             "not for dlopen()-style pure Python modules")
         recompile(self, module_name, source,
-                  c_file=filename, call_c_compiler=False, **kwds)
+                  c_file=filename, call_c_compiler=False,
+                  uses_ffiplatform=False, **kwds)
 
     def emit_python_code(self, filename):
         from .recompiler import recompile
@@ -675,7 +699,8 @@ class FFI(object):
             raise TypeError("emit_python_code() is only for dlopen()-style "
                             "pure Python modules, not for C extension modules")
         recompile(self, module_name, source,
-                  c_file=filename, call_c_compiler=False, **kwds)
+                  c_file=filename, call_c_compiler=False,
+                  uses_ffiplatform=False, **kwds)
 
     def compile(self, tmpdir='.', verbose=0, target=None, debug=None):
         """The 'target' argument gives the final file name of the
@@ -773,9 +798,9 @@ class FFI(object):
 
 def _load_backend_lib(backend, name, flags):
     import os
-    if name is None:
-        if sys.platform != "win32":
-            return backend.load_library(None, flags)
+    if not isinstance(name, basestring):
+        if sys.platform != "win32" or name is not None:
+            return backend.load_library(name, flags)
         name = "c"    # Windows: load_library(None) fails, but this works
                       # on Python 2 (backward compatibility hack only)
     first_error = None
@@ -877,7 +902,7 @@ def _make_ffi_library(ffi, libname, flags):
                     raise AttributeError(name)
             accessors[name](name)
     #
-    class FFILibrary(object):
+    class FFILibrary:
         def __getattr__(self, name):
             make_accessor(name)
             return getattr(self, name)
@@ -909,7 +934,7 @@ def _make_ffi_library(ffi, libname, flags):
             backendlib.close_lib()
             self.__dict__.clear()
     #
-    if libname is not None:
+    if isinstance(libname, basestring):
         try:
             if not isinstance(libname, str):    # unicode, on Python 2
                 libname = libname.encode('utf-8')

@@ -8,7 +8,7 @@ from . import model
 from .error import VerificationError
 
 
-class VGenericEngine(object):
+class VGenericEngine:
     _class_key = 'g'
     _gen_python_module = False
 
@@ -565,7 +565,7 @@ class VGenericEngine(object):
 
     def _generate_gen_variable_decl(self, tp, name):
         if isinstance(tp, model.ArrayType):
-            if tp.length == '...':
+            if tp.length_is_unknown():
                 prnt = self._prnt
                 funcname = '_cffi_sizeof_%s' % (name,)
                 self.export_symbols.append(funcname)
@@ -584,7 +584,7 @@ class VGenericEngine(object):
     def _loaded_gen_variable(self, tp, name, module, library):
         if isinstance(tp, model.ArrayType):   # int a[5] is "constant" in the
                                               # sense that "a=..." is forbidden
-            if tp.length == '...':
+            if tp.length_is_unknown():
                 funcname = '_cffi_sizeof_%s' % (name,)
                 BFunc = self.ffi._typeof_locked('size_t(*)(void)')[0]
                 function = module.load_function(BFunc, funcname)
@@ -666,10 +666,14 @@ cffimod_header = r'''
     typedef unsigned char _Bool;
 #  endif
 # endif
+# define _cffi_float_complex_t   _Fcomplex    /* include <complex.h> for it */
+# define _cffi_double_complex_t  _Dcomplex    /* include <complex.h> for it */
 #else
 # include <stdint.h>
 # if (defined (__SVR4) && defined (__sun)) || defined(_AIX) || defined(__hpux)
 #  include <alloca.h>
 # endif
+# define _cffi_float_complex_t   float _Complex
+# define _cffi_double_complex_t  double _Complex
 #endif
 '''

@@ -2,55 +2,88 @@
 # 2.0, and the BSD License. See the LICENSE file in the root of this repository
 # for complete details.
 
-from __future__ import absolute_import, division, print_function
+from __future__ import annotations
 
 import abc
-import math
 
-import six
-
-from cryptography import utils
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives._asymmetric import (
+    AsymmetricPadding as AsymmetricPadding,
+)
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 
-@six.add_metaclass(abc.ABCMeta)
-class AsymmetricPadding(object):
-    @abc.abstractproperty
-    def name(self):
-        """
-        A string naming this padding (e.g. "PSS", "PKCS1").
-        """
-
-
-@utils.register_interface(AsymmetricPadding)
-class PKCS1v15(object):
+class PKCS1v15(AsymmetricPadding):
     name = "EMSA-PKCS1-v1_5"
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PKCS1v15):
+            return NotImplemented
 
-@utils.register_interface(AsymmetricPadding)
-class PSS(object):
-    MAX_LENGTH = object()
+        return True
+
+
+class _MaxLength:
+    "Sentinel value for `MAX_LENGTH`."
+
+
+class _Auto:
+    "Sentinel value for `AUTO`."
+
+
+class _DigestLength:
+    "Sentinel value for `DIGEST_LENGTH`."
+
+
+class PSS(AsymmetricPadding):
+    MAX_LENGTH = _MaxLength()
+    AUTO = _Auto()
+    DIGEST_LENGTH = _DigestLength()
     name = "EMSA-PSS"
+    _salt_length: int | _MaxLength | _Auto | _DigestLength
 
-    def __init__(self, mgf, salt_length):
+    def __init__(
+        self,
+        mgf: MGF,
+        salt_length: int | _MaxLength | _Auto | _DigestLength,
+    ) -> None:
         self._mgf = mgf
 
-        if (not isinstance(salt_length, six.integer_types) and
-                salt_length is not self.MAX_LENGTH):
-            raise TypeError("salt_length must be an integer.")
+        if not isinstance(
+            salt_length, (int, _MaxLength, _Auto, _DigestLength)
+        ):
+            raise TypeError(
+                "salt_length must be an integer, MAX_LENGTH, "
+                "DIGEST_LENGTH, or AUTO"
+            )
 
-        if salt_length is not self.MAX_LENGTH and salt_length < 0:
+        if isinstance(salt_length, int) and salt_length < 0:
             raise ValueError("salt_length must be zero or greater.")
 
         self._salt_length = salt_length
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PSS):
+            return NotImplemented
 
-@utils.register_interface(AsymmetricPadding)
-class OAEP(object):
+        return (
+            self._mgf == other._mgf and self._salt_length == other._salt_length
+        )
+
+    @property
+    def mgf(self) -> MGF:
+        return self._mgf
+
+
+class OAEP(AsymmetricPadding):
     name = "EME-OAEP"
 
-    def __init__(self, mgf, algorithm, label):
+    def __init__(
+        self,
+        mgf: MGF,
+        algorithm: hashes.HashAlgorithm,
+        label: bytes | None,
+    ):
         if not isinstance(algorithm, hashes.HashAlgorithm):
             raise TypeError("Expected instance of hashes.HashAlgorithm.")
 
@@ -58,22 +91,51 @@ class OAEP(object):
         self._algorithm = algorithm
         self._label = label
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, OAEP):
+            return NotImplemented
 
-class MGF1(object):
-    MAX_LENGTH = object()
+        return (
+            self._mgf == other._mgf
+            and self._algorithm == other._algorithm
+            and self._label == other._label
+        )
 
-    def __init__(self, algorithm):
+    @property
+    def algorithm(self) -> hashes.HashAlgorithm:
+        return self._algorithm
+
+    @property
+    def mgf(self) -> MGF:
+        return self._mgf
+
+
+class MGF(metaclass=abc.ABCMeta):
+    _algorithm: hashes.HashAlgorithm
+
+
+class MGF1(MGF):
+    def __init__(self, algorithm: hashes.HashAlgorithm):
         if not isinstance(algorithm, hashes.HashAlgorithm):
             raise TypeError("Expected instance of hashes.HashAlgorithm.")
 
         self._algorithm = algorithm
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MGF1):
+            return NotImplemented
 
-def calculate_max_pss_salt_length(key, hash_algorithm):
+        return self._algorithm == other._algorithm
+
+
+def calculate_max_pss_salt_length(
+    key: rsa.RSAPrivateKey | rsa.RSAPublicKey,
+    hash_algorithm: hashes.HashAlgorithm,
+) -> int:
     if not isinstance(key, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
         raise TypeError("key must be an RSA public or private key")
     # bit length - 1 per RFC 3447
-    emlen = int(math.ceil((key.key_size - 1) / 8.0))
+    emlen = (key.key_size + 6) // 8
     salt_length = emlen - hash_algorithm.digest_size - 2
     assert salt_length >= 0
     return salt_length

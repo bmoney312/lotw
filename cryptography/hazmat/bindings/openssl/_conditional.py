@@ -2,125 +2,17 @@
 # 2.0, and the BSD License. See the LICENSE file in the root of this repository
 # for complete details.
 
-from __future__ import absolute_import, division, print_function
+from __future__ import annotations
 
 
-def cryptography_has_ec2m():
-    return [
-        "EC_POINT_set_affine_coordinates_GF2m",
-        "EC_POINT_get_affine_coordinates_GF2m",
-        "EC_POINT_set_compressed_coordinates_GF2m",
-    ]
-
-
-def cryptography_has_ec_1_0_2():
-    return [
-        "EC_curve_nid2nist",
-    ]
-
-
-def cryptography_has_set_ecdh_auto():
-    return [
-        "SSL_CTX_set_ecdh_auto",
-    ]
-
-
-def cryptography_has_rsa_r_pkcs_decoding_error():
-    return [
-        "RSA_R_PKCS_DECODING_ERROR"
-    ]
-
-
-def cryptography_has_rsa_oaep_md():
-    return [
-        "EVP_PKEY_CTX_set_rsa_oaep_md",
-    ]
-
-
-def cryptography_has_rsa_oaep_label():
-    return [
-        "EVP_PKEY_CTX_set0_rsa_oaep_label",
-    ]
-
-
-def cryptography_has_ssl3_method():
-    return [
-        "SSLv3_method",
-        "SSLv3_client_method",
-        "SSLv3_server_method",
-    ]
-
-
-def cryptography_has_alpn():
-    return [
-        "SSL_CTX_set_alpn_protos",
-        "SSL_set_alpn_protos",
-        "SSL_CTX_set_alpn_select_cb",
-        "SSL_get0_alpn_selected",
-    ]
-
-
-def cryptography_has_compression():
-    return [
-        "SSL_get_current_compression",
-        "SSL_get_current_expansion",
-        "SSL_COMP_get_name",
-    ]
-
-
-def cryptography_has_get_server_tmp_key():
-    return [
-        "SSL_get_server_tmp_key",
-    ]
-
-
-def cryptography_has_102_verification_error_codes():
-    return [
-        'X509_V_ERR_SUITE_B_INVALID_VERSION',
-        'X509_V_ERR_SUITE_B_INVALID_ALGORITHM',
-        'X509_V_ERR_SUITE_B_INVALID_CURVE',
-        'X509_V_ERR_SUITE_B_INVALID_SIGNATURE_ALGORITHM',
-        'X509_V_ERR_SUITE_B_LOS_NOT_ALLOWED',
-        'X509_V_ERR_SUITE_B_CANNOT_SIGN_P_384_WITH_P_256',
-        'X509_V_ERR_HOSTNAME_MISMATCH',
-        'X509_V_ERR_EMAIL_MISMATCH',
-        'X509_V_ERR_IP_ADDRESS_MISMATCH'
-    ]
-
-
-def cryptography_has_102_verification_params():
-    return [
-        "X509_V_FLAG_SUITEB_128_LOS_ONLY",
-        "X509_V_FLAG_SUITEB_192_LOS",
-        "X509_V_FLAG_SUITEB_128_LOS",
-        "X509_VERIFY_PARAM_set1_host",
-        "X509_VERIFY_PARAM_set1_email",
-        "X509_VERIFY_PARAM_set1_ip",
-        "X509_VERIFY_PARAM_set1_ip_asc",
-        "X509_VERIFY_PARAM_set_hostflags",
-    ]
-
-
-def cryptography_has_x509_v_flag_trusted_first():
-    return [
-        "X509_V_FLAG_TRUSTED_FIRST",
-    ]
-
-
-def cryptography_has_x509_v_flag_partial_chain():
-    return [
-        "X509_V_FLAG_PARTIAL_CHAIN",
-    ]
-
-
-def cryptography_has_set_cert_cb():
+def cryptography_has_set_cert_cb() -> list[str]:
     return [
         "SSL_CTX_set_cert_cb",
         "SSL_set_cert_cb",
     ]
 
 
-def cryptography_has_ssl_st():
+def cryptography_has_ssl_st() -> list[str]:
     return [
         "SSL_ST_BEFORE",
         "SSL_ST_OK",
@@ -129,102 +21,20 @@ def cryptography_has_ssl_st():
     ]
 
 
-def cryptography_has_tls_st():
+def cryptography_has_tls_st() -> list[str]:
     return [
         "TLS_ST_BEFORE",
         "TLS_ST_OK",
     ]
 
 
-def cryptography_has_locking_callbacks():
-    return [
-        "CRYPTO_LOCK",
-        "CRYPTO_UNLOCK",
-        "CRYPTO_READ",
-        "CRYPTO_LOCK_SSL",
-        "CRYPTO_lock",
-    ]
-
-
-def cryptography_has_scrypt():
-    return [
-        "EVP_PBE_scrypt",
-    ]
-
-
-def cryptography_has_generic_dtls_method():
-    return [
-        "DTLS_method",
-        "DTLS_server_method",
-        "DTLS_client_method",
-        "SSL_OP_NO_DTLSv1",
-        "SSL_OP_NO_DTLSv1_2",
-        "DTLS_set_link_mtu",
-        "DTLS_get_link_min_mtu",
-    ]
-
-
-def cryptography_has_evp_pkey_dhx():
-    return [
-        "EVP_PKEY_DHX",
-    ]
-
-
-def cryptography_has_mem_functions():
-    return [
-        "Cryptography_CRYPTO_set_mem_functions",
-    ]
-
-
-def cryptography_has_sct():
-    return [
-        "SCT_get_version",
-        "SCT_get_log_entry_type",
-        "SCT_get0_log_id",
-        "SCT_get_timestamp",
-        "SCT_set_source",
-        "sk_SCT_num",
-        "sk_SCT_value",
-        "SCT_LIST_free",
-    ]
-
-
-def cryptography_has_x509_store_ctx_get_issuer():
-    return [
-        "X509_STORE_get_get_issuer",
-        "X509_STORE_set_get_issuer",
-    ]
-
-
-def cryptography_has_x25519():
-    return [
-        "EVP_PKEY_X25519",
-        "NID_X25519",
-    ]
-
-
-def cryptography_has_evp_pkey_get_set_tls_encodedpoint():
-    return [
-        "EVP_PKEY_get1_tls_encodedpoint",
-        "EVP_PKEY_set1_tls_encodedpoint",
-    ]
-
-
-def cryptography_has_fips():
-    return [
-        "FIPS_set_mode",
-        "FIPS_mode",
-    ]
-
-
-def cryptography_has_ssl_sigalgs():
+def cryptography_has_ssl_sigalgs() -> list[str]:
     return [
         "SSL_CTX_set1_sigalgs_list",
-        "SSL_get_sigalgs",
     ]
 
 
-def cryptography_has_psk():
+def cryptography_has_psk() -> list[str]:
     return [
         "SSL_CTX_use_psk_identity_hint",
         "SSL_CTX_set_psk_server_callback",
@@ -232,7 +42,19 @@ def cryptography_has_psk():
     ]
 
 
-def cryptography_has_custom_ext():
+def cryptography_has_psk_tlsv13() -> list[str]:
+    return [
+        "SSL_CTX_set_psk_find_session_callback",
+        "SSL_CTX_set_psk_use_session_callback",
+        "Cryptography_SSL_SESSION_new",
+        "SSL_CIPHER_find",
+        "SSL_SESSION_set1_master_key",
+        "SSL_SESSION_set_cipher",
+        "SSL_SESSION_set_protocol_version",
+    ]
+
+
+def cryptography_has_custom_ext() -> list[str]:
     return [
         "SSL_CTX_add_client_custom_ext",
         "SSL_CTX_add_server_custom_ext",
@@ -240,10 +62,102 @@ def cryptography_has_custom_ext():
     ]
 
 
-def cryptography_has_openssl_cleanup():
+def cryptography_has_tlsv13_functions() -> list[str]:
     return [
-        "OPENSSL_cleanup",
+        "SSL_CTX_set_ciphersuites",
     ]
+
+
+def cryptography_has_tlsv13_hs_functions() -> list[str]:
+    return [
+        "SSL_VERIFY_POST_HANDSHAKE",
+        "SSL_verify_client_post_handshake",
+        "SSL_CTX_set_post_handshake_auth",
+        "SSL_set_post_handshake_auth",
+        "SSL_SESSION_get_max_early_data",
+        "SSL_write_early_data",
+        "SSL_read_early_data",
+        "SSL_CTX_set_max_early_data",
+    ]
+
+
+def cryptography_has_ssl_verify_client_post_handshake() -> list[str]:
+    return [
+        "SSL_verify_client_post_handshake",
+    ]
+
+
+def cryptography_has_engine() -> list[str]:
+    return [
+        "ENGINE_by_id",
+        "ENGINE_init",
+        "ENGINE_finish",
+        "ENGINE_get_default_RAND",
+        "ENGINE_set_default_RAND",
+        "ENGINE_unregister_RAND",
+        "ENGINE_ctrl_cmd",
+        "ENGINE_free",
+        "ENGINE_get_name",
+        "ENGINE_ctrl_cmd_string",
+        "ENGINE_load_builtin_engines",
+        "ENGINE_load_private_key",
+        "ENGINE_load_public_key",
+        "SSL_CTX_set_client_cert_engine",
+    ]
+
+
+def cryptography_has_verified_chain() -> list[str]:
+    return [
+        "SSL_get0_verified_chain",
+    ]
+
+
+def cryptography_has_srtp() -> list[str]:
+    return [
+        "SSL_CTX_set_tlsext_use_srtp",
+        "SSL_set_tlsext_use_srtp",
+        "SSL_get_selected_srtp_profile",
+    ]
+
+
+def cryptography_has_dtls_get_data_mtu() -> list[str]:
+    return [
+        "DTLS_get_data_mtu",
+    ]
+
+
+def cryptography_has_ssl_cookie() -> list[str]:
+    return [
+        "SSL_OP_COOKIE_EXCHANGE",
+        "DTLS1_COOKIE_LENGTH",
+        "DTLSv1_listen",
+        "SSL_CTX_set_cookie_generate_cb",
+        "SSL_CTX_set_cookie_verify_cb",
+    ]
+
+
+def cryptography_has_prime_checks() -> list[str]:
+    return [
+        "BN_prime_checks_for_size",
+    ]
+
+
+def cryptography_has_unexpected_eof_while_reading() -> list[str]:
+    return ["SSL_R_UNEXPECTED_EOF_WHILE_READING"]
+
+
+def cryptography_has_ssl_op_ignore_unexpected_eof() -> list[str]:
+    return [
+        "SSL_OP_IGNORE_UNEXPECTED_EOF",
+    ]
+
+
+def cryptography_has_get_extms_support() -> list[str]:
+    return ["SSL_get_extms_support"]
+
+
+def cryptography_has_ssl_get0_group_name() -> list[str]:
+    return ["SSL_get0_group_name"]
 
 
 # This is a mapping of
@@ -252,51 +166,34 @@ def cryptography_has_openssl_cleanup():
 # when cffi supports #if in cdef. We use functions instead of just a dict of
 # lists so we can use coverage to measure which are used.
 CONDITIONAL_NAMES = {
-    "Cryptography_HAS_EC2M": cryptography_has_ec2m,
-    "Cryptography_HAS_EC_1_0_2": cryptography_has_ec_1_0_2,
-    "Cryptography_HAS_SET_ECDH_AUTO": cryptography_has_set_ecdh_auto,
-    "Cryptography_HAS_RSA_R_PKCS_DECODING_ERROR": (
-        cryptography_has_rsa_r_pkcs_decoding_error
-    ),
-    "Cryptography_HAS_RSA_OAEP_MD": cryptography_has_rsa_oaep_md,
-    "Cryptography_HAS_RSA_OAEP_LABEL": cryptography_has_rsa_oaep_label,
-    "Cryptography_HAS_SSL3_METHOD": cryptography_has_ssl3_method,
-    "Cryptography_HAS_ALPN": cryptography_has_alpn,
-    "Cryptography_HAS_COMPRESSION": cryptography_has_compression,
-    "Cryptography_HAS_GET_SERVER_TMP_KEY": cryptography_has_get_server_tmp_key,
-    "Cryptography_HAS_102_VERIFICATION_ERROR_CODES": (
-        cryptography_has_102_verification_error_codes
-    ),
-    "Cryptography_HAS_102_VERIFICATION_PARAMS": (
-        cryptography_has_102_verification_params
-    ),
-    "Cryptography_HAS_X509_V_FLAG_TRUSTED_FIRST": (
-        cryptography_has_x509_v_flag_trusted_first
-    ),
-    "Cryptography_HAS_X509_V_FLAG_PARTIAL_CHAIN": (
-        cryptography_has_x509_v_flag_partial_chain
-    ),
     "Cryptography_HAS_SET_CERT_CB": cryptography_has_set_cert_cb,
     "Cryptography_HAS_SSL_ST": cryptography_has_ssl_st,
     "Cryptography_HAS_TLS_ST": cryptography_has_tls_st,
-    "Cryptography_HAS_LOCKING_CALLBACKS": cryptography_has_locking_callbacks,
-    "Cryptography_HAS_SCRYPT": cryptography_has_scrypt,
-    "Cryptography_HAS_GENERIC_DTLS_METHOD": (
-        cryptography_has_generic_dtls_method
-    ),
-    "Cryptography_HAS_EVP_PKEY_DHX": cryptography_has_evp_pkey_dhx,
-    "Cryptography_HAS_MEM_FUNCTIONS": cryptography_has_mem_functions,
-    "Cryptography_HAS_SCT": cryptography_has_sct,
-    "Cryptography_HAS_X509_STORE_CTX_GET_ISSUER": (
-        cryptography_has_x509_store_ctx_get_issuer
-    ),
-    "Cryptography_HAS_X25519": cryptography_has_x25519,
-    "Cryptography_HAS_EVP_PKEY_get_set_tls_encodedpoint": (
-        cryptography_has_evp_pkey_get_set_tls_encodedpoint
-    ),
-    "Cryptography_HAS_FIPS": cryptography_has_fips,
     "Cryptography_HAS_SIGALGS": cryptography_has_ssl_sigalgs,
     "Cryptography_HAS_PSK": cryptography_has_psk,
+    "Cryptography_HAS_PSK_TLSv1_3": cryptography_has_psk_tlsv13,
     "Cryptography_HAS_CUSTOM_EXT": cryptography_has_custom_ext,
-    "Cryptography_HAS_OPENSSL_CLEANUP": cryptography_has_openssl_cleanup,
+    "Cryptography_HAS_TLSv1_3_FUNCTIONS": cryptography_has_tlsv13_functions,
+    "Cryptography_HAS_TLSv1_3_HS_FUNCTIONS": (
+        cryptography_has_tlsv13_hs_functions
+    ),
+    "Cryptography_HAS_SSL_VERIFY_CLIENT_POST_HANDSHAKE": (
+        cryptography_has_ssl_verify_client_post_handshake
+    ),
+    "Cryptography_HAS_ENGINE": cryptography_has_engine,
+    "Cryptography_HAS_VERIFIED_CHAIN": cryptography_has_verified_chain,
+    "Cryptography_HAS_SRTP": cryptography_has_srtp,
+    "Cryptography_HAS_DTLS_GET_DATA_MTU": cryptography_has_dtls_get_data_mtu,
+    "Cryptography_HAS_SSL_COOKIE": cryptography_has_ssl_cookie,
+    "Cryptography_HAS_PRIME_CHECKS": cryptography_has_prime_checks,
+    "Cryptography_HAS_UNEXPECTED_EOF_WHILE_READING": (
+        cryptography_has_unexpected_eof_while_reading
+    ),
+    "Cryptography_HAS_SSL_OP_IGNORE_UNEXPECTED_EOF": (
+        cryptography_has_ssl_op_ignore_unexpected_eof
+    ),
+    "Cryptography_HAS_GET_EXTMS_SUPPORT": cryptography_has_get_extms_support,
+    "Cryptography_HAS_SSL_GET0_GROUP_NAME": (
+        cryptography_has_ssl_get0_group_name
+    ),
 }

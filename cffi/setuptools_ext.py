@@ -1,5 +1,6 @@
 import os
 import sys
+import sysconfig
 
 try:
     basestring
@@ -8,7 +9,7 @@ except NameError:
     basestring = str
 
 def error(msg):
-    from distutils.errors import DistutilsSetupError
+    from cffi._shimmed_dist_utils import DistutilsSetupError
     raise DistutilsSetupError(msg)
 
 
@@ -82,12 +83,16 @@ def _set_py_limited_api(Extension, kwds):
     for "not hasattr(sys, 'gettotalrefcount')" (the 2.7 compatible equivalent
     of 'd' not in sys.abiflags). (http://bugs.python.org/issue28401)
 
-    On Windows, it's better not to use py_limited_api until issue #355
-    can be resolved (by having virtualenv copy PYTHON3.DLL).  See also
-    the start of _cffi_include.h.
+    On Windows, with CPython <= 3.4, it's better not to use py_limited_api
+    because virtualenv *still* doesn't copy PYTHON3.DLL on these versions.
+    Recently (2020) we started shipping only >= 3.5 wheels, though.  So
+    we'll give it another try and set py_limited_api on Windows >= 3.5.
     """
+    from cffi._shimmed_dist_utils import log
+    from cffi import recompiler
+
     if ('py_limited_api' not in kwds and not hasattr(sys, 'gettotalrefcount')
-            and sys.platform != 'win32'):
+            and recompiler.USE_LIMITED_API):
         import setuptools
         try:
             setuptools_major_version = int(setuptools.__version__.partition('.')[0])
@@ -98,14 +103,25 @@ def _set_py_limited_api(Extension, kwds):
             # try to set 'py_limited_api' anyway.  At worst, we get a
             # warning.
             kwds['py_limited_api'] = True
+
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        if sys.version_info < (3, 15):
+            if kwds.get('py_limited_api'):
+                log.info("Ignoring py_limited_api=True for free-threaded build.")
+            kwds['py_limited_api'] = False
+        else:
+            kwds.setdefault("define_macros", []).append(("Py_TARGET_ABI3T", "0x030f0000"))
+
+    if kwds.get('py_limited_api') is False:
+        # avoid setting Py_LIMITED_API if py_limited_api=False
+        # which _cffi_include.h does unless _CFFI_NO_LIMITED_API is defined
+        kwds.setdefault("define_macros", []).append(("_CFFI_NO_LIMITED_API", None))
     return kwds
 
 def _add_c_module(dist, ffi, module_name, source, source_extension, kwds):
-    from distutils.core import Extension
     # We are a setuptools extension. Need this build_ext for py_limited_api.
     from setuptools.command.build_ext import build_ext
-    from distutils.dir_util import mkpath
-    from distutils import log
+    from cffi._shimmed_dist_utils import Extension, log, mkpath
     from cffi import recompiler
 
     allsources = ['$PLACEHOLDER']
@@ -147,10 +163,9 @@ def _add_c_module(dist, ffi, module_name, source, source_extension, kwds):
 
 
 def _add_py_module(dist, ffi, module_name):
-    from distutils.dir_util import mkpath
     from setuptools.command.build_py import build_py
     from setuptools.command.build_ext import build_ext
-    from distutils import log
+    from cffi._shimmed_dist_utils import log, mkpath
     from cffi import recompiler
 
     def generate_mod(py_file):
@@ -167,6 +182,17 @@ def _add_py_module(dist, ffi, module_name):
             module_path = module_name.split('.')
             module_path[-1] += '.py'
             generate_mod(os.path.join(self.build_lib, *module_path))
+        def get_source_files(self):
+            # This is called from 'setup.py sdist' only.  Exclude
+            # the generate .py module in this case.
+            saved_py_modules = self.py_modules
+            try:
+                if saved_py_modules:
+                    self.py_modules = [m for m in saved_py_modules
+                                         if m != module_name]
+                return base_class.get_source_files(self)
+            finally:
+                self.py_modules = saved_py_modules
     dist.cmdclass['build_py'] = build_py_make_mod
 
     # distutils and setuptools have no notion I could find of a
@@ -176,6 +202,7 @@ def _add_py_module(dist, ffi, module_name):
     # the module.  So we add it here, which gives a few apparently
     # harmless warnings about not finding the file outside the
     # build directory.
+    # Then we need to hack more in get_source_files(); see above.
     if dist.py_modules is None:
         dist.py_modules = []
     dist.py_modules.append(module_name)

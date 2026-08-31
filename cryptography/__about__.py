@@ -2,22 +2,16 @@
 # 2.0, and the BSD License. See the LICENSE file in the root of this repository
 # for complete details.
 
-from __future__ import absolute_import, division, print_function
+from __future__ import annotations
 
 __all__ = [
-    "__title__", "__summary__", "__uri__", "__version__", "__author__",
-    "__email__", "__license__", "__copyright__",
+    "__author__",
+    "__copyright__",
+    "__version__",
 ]
 
-__title__ = "cryptography"
-__summary__ = ("cryptography is a package which provides cryptographic recipes"
-               " and primitives to Python developers.")
-__uri__ = "https://github.com/pyca/cryptography"
+__version__ = "50.0.1"
 
-__version__ = "2.3"
 
-__author__ = "The cryptography developers"
-__email__ = "cryptography-dev@python.org"
-
-__license__ = "BSD or Apache License, Version 2.0"
-__copyright__ = "Copyright 2013-2017 {0}".format(__author__)
+__author__ = "The Python Cryptographic Authority and individual contributors"
+__copyright__ = f"Copyright 2013-2026 {__author__}"

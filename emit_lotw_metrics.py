@@ -73,8 +73,7 @@ def lambda_handler(event, context):
 
     # --- Determine Current Year and Week ---
     try:
-<<<<<<< HEAD
-         # determine current week
+        # determine current week
         current_week = os.environ.get('week')
         current_year = get_current_year()
 
@@ -82,28 +81,13 @@ def lambda_handler(event, context):
             current_week = get_current_week(conn)
         else:
             current_week = int(current_week)
-=======
-        current_year = get_current_year()
-        current_week = get_current_week(conn)
->>>>>>> origin/main
 
         if current_week is None:
             logger.error("ERROR: Unable to determine current week!")
             sys.exit()
-<<<<<<< HEAD
-
-#        current_week = get_current_week(conn)
-#
-#        if current_week is None:
-#            logger.error("ERROR: Unable to determine current week!")
-#            sys.exit()
-#        else:
-#            current_week = int(current_week)
-=======
         else:
             current_week = int(current_week)
->>>>>>> origin/main
-        
+
         metrics_week = current_week - 1 # For "past week" metrics
         
         time_now = datetime.datetime.now().replace(second=0, microsecond=0)

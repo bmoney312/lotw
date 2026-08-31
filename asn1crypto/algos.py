@@ -114,6 +114,10 @@ class HmacAlgorithmId(ObjectIdentifier):
         '1.2.840.113549.2.11': 'sha512',
         '1.2.840.113549.2.12': 'sha512_224',
         '1.2.840.113549.2.13': 'sha512_256',
+        '2.16.840.1.101.3.4.2.13': 'sha3_224',
+        '2.16.840.1.101.3.4.2.14': 'sha3_256',
+        '2.16.840.1.101.3.4.2.15': 'sha3_384',
+        '2.16.840.1.101.3.4.2.16': 'sha3_512',
     }
 
 
@@ -135,6 +139,14 @@ class DigestAlgorithmId(ObjectIdentifier):
         '2.16.840.1.101.3.4.2.3': 'sha512',
         '2.16.840.1.101.3.4.2.5': 'sha512_224',
         '2.16.840.1.101.3.4.2.6': 'sha512_256',
+        '2.16.840.1.101.3.4.2.7': 'sha3_224',
+        '2.16.840.1.101.3.4.2.8': 'sha3_256',
+        '2.16.840.1.101.3.4.2.9': 'sha3_384',
+        '2.16.840.1.101.3.4.2.10': 'sha3_512',
+        '2.16.840.1.101.3.4.2.11': 'shake128',
+        '2.16.840.1.101.3.4.2.12': 'shake256',
+        '2.16.840.1.101.3.4.2.17': 'shake128_len',
+        '2.16.840.1.101.3.4.2.18': 'shake256_len',
     }
 
 
@@ -240,10 +252,17 @@ class SignedDigestAlgorithmId(ObjectIdentifier):
         '1.2.840.10045.4.3.2': 'sha256_ecdsa',
         '1.2.840.10045.4.3.3': 'sha384_ecdsa',
         '1.2.840.10045.4.3.4': 'sha512_ecdsa',
+        '2.16.840.1.101.3.4.3.9': 'sha3_224_ecdsa',
+        '2.16.840.1.101.3.4.3.10': 'sha3_256_ecdsa',
+        '2.16.840.1.101.3.4.3.11': 'sha3_384_ecdsa',
+        '2.16.840.1.101.3.4.3.12': 'sha3_512_ecdsa',
         # For when the digest is specified elsewhere in a Sequence
         '1.2.840.113549.1.1.1': 'rsassa_pkcs1v15',
         '1.2.840.10040.4.1': 'dsa',
         '1.2.840.10045.4': 'ecdsa',
+        # RFC 8410 -- https://tools.ietf.org/html/rfc8410
+        '1.3.101.112': 'ed25519',
+        '1.3.101.113': 'ed448',
     }
 
     _reverse_map = {
@@ -266,6 +285,12 @@ class SignedDigestAlgorithmId(ObjectIdentifier):
         'sha384_rsa': '1.2.840.113549.1.1.12',
         'sha512_ecdsa': '1.2.840.10045.4.3.4',
         'sha512_rsa': '1.2.840.113549.1.1.13',
+        'sha3_224_ecdsa': '2.16.840.1.101.3.4.3.9',
+        'sha3_256_ecdsa': '2.16.840.1.101.3.4.3.10',
+        'sha3_384_ecdsa': '2.16.840.1.101.3.4.3.11',
+        'sha3_512_ecdsa': '2.16.840.1.101.3.4.3.12',
+        'ed25519': '1.3.101.112',
+        'ed448': '1.3.101.113',
     }
 
 
@@ -284,8 +309,8 @@ class SignedDigestAlgorithm(_ForceNullParameters, Sequence):
     def signature_algo(self):
         """
         :return:
-            A unicode string of "rsassa_pkcs1v15", "rsassa_pss", "dsa" or
-            "ecdsa"
+            A unicode string of "rsassa_pkcs1v15", "rsassa_pss", "dsa",
+            "ecdsa", "ed25519" or "ed448"
         """
 
         algorithm = self['algorithm'].native
@@ -309,7 +334,13 @@ class SignedDigestAlgorithm(_ForceNullParameters, Sequence):
             'sha256_ecdsa': 'ecdsa',
             'sha384_ecdsa': 'ecdsa',
             'sha512_ecdsa': 'ecdsa',
+            'sha3_224_ecdsa': 'ecdsa',
+            'sha3_256_ecdsa': 'ecdsa',
+            'sha3_384_ecdsa': 'ecdsa',
+            'sha3_512_ecdsa': 'ecdsa',
             'ecdsa': 'ecdsa',
+            'ed25519': 'ed25519',
+            'ed448': 'ed448',
         }
         if algorithm in algo_map:
             return algo_map[algorithm]
@@ -326,7 +357,7 @@ class SignedDigestAlgorithm(_ForceNullParameters, Sequence):
         """
         :return:
             A unicode string of "md2", "md5", "sha1", "sha224", "sha256",
-            "sha384", "sha512", "sha512_224", "sha512_256"
+            "sha384", "sha512", "sha512_224", "sha512_256" or "shake256"
         """
 
         algorithm = self['algorithm'].native
@@ -347,6 +378,8 @@ class SignedDigestAlgorithm(_ForceNullParameters, Sequence):
             'sha256_ecdsa': 'sha256',
             'sha384_ecdsa': 'sha384',
             'sha512_ecdsa': 'sha512',
+            'ed25519': 'sha512',
+            'ed448': 'shake256',
         }
         if algorithm in algo_map:
             return algo_map[algorithm]
@@ -451,6 +484,15 @@ class Pbes1Params(Sequence):
     _fields = [
         ('salt', OctetString),
         ('iterations', Integer),
+    ]
+
+
+class CcmParams(Sequence):
+    # https://tools.ietf.org/html/rfc5084
+    # aes_ICVlen: 4 | 6 | 8 | 10 | 12 | 14 | 16
+    _fields = [
+        ('aes_nonce', OctetString),
+        ('aes_icvlen', Integer),
     ]
 
 
@@ -563,6 +605,7 @@ class EncryptionAlgorithmId(ObjectIdentifier):
         '1.3.14.3.2.7': 'des',
         '1.2.840.113549.3.7': 'tripledes_3key',
         '1.2.840.113549.3.2': 'rc2',
+        '1.2.840.113549.3.4': 'rc4',
         '1.2.840.113549.3.9': 'rc5',
         # From http://csrc.nist.gov/groups/ST/crypto_apps_infra/csor/algorithms.html#AES
         '2.16.840.1.101.3.4.1.1': 'aes128_ecb',
@@ -628,6 +671,10 @@ class EncryptionAlgorithm(_ForceNullParameters, Sequence):
         'aes128_ofb': OctetString,
         'aes192_ofb': OctetString,
         'aes256_ofb': OctetString,
+        # From RFC5084
+        'aes128_ccm': CcmParams,
+        'aes192_ccm': CcmParams,
+        'aes256_ccm': CcmParams,
         # From PKCS#5
         'pbes1_md2_des': Pbes1Params,
         'pbes1_md5_des': Pbes1Params,
@@ -836,8 +883,7 @@ class EncryptionAlgorithm(_ForceNullParameters, Sequence):
             return cipher_lengths[encryption_algo]
 
         if encryption_algo == 'rc2':
-            rc2_params = self['parameters'].parsed['encryption_scheme']['parameters'].parsed
-            rc2_parameter_version = rc2_params['rc2_parameter_version'].native
+            rc2_parameter_version = self['parameters']['rc2_parameter_version'].native
 
             # See page 24 of
             # http://www.emc.com/collateral/white-papers/h11302-pkcs5v2-1-password-based-cryptography-standard-wp.pdf
@@ -1004,7 +1050,7 @@ class EncryptionAlgorithm(_ForceNullParameters, Sequence):
             return cipher_map[encryption_algo]
 
         if encryption_algo == 'rc5':
-            return self['parameters'].parsed['block_size_in_bits'].native / 8
+            return self['parameters']['block_size_in_bits'].native // 8
 
         if encryption_algo == 'pbes2':
             return self['parameters']['encryption_scheme'].encryption_block_size
@@ -1046,7 +1092,7 @@ class EncryptionAlgorithm(_ForceNullParameters, Sequence):
         encryption_algo = self['algorithm'].native
 
         if encryption_algo in set(['rc2', 'rc5']):
-            return self['parameters'].parsed['iv'].native
+            return self['parameters']['iv'].native
 
         # For DES/Triple DES and AES the IV is the entirety of the parameters
         octet_string_iv_oids = set([

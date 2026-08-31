@@ -12,7 +12,7 @@ else:
 class CTypesType(type):
     pass
 
-class CTypesData(object):
+class CTypesData:
     __metaclass__ = CTypesType
     __slots__ = ['__weakref__']
     __name__ = '<cdata>'
@@ -270,7 +270,7 @@ class CTypesBaseStructOrUnion(CTypesData):
         return CTypesData.__repr__(self, c_name or self._get_c_name(' &'))
 
 
-class CTypesBackend(object):
+class CTypesBackend:
 
     PRIMITIVE_TYPES = {
         'char': ctypes.c_char,
@@ -336,7 +336,6 @@ class CTypesBackend(object):
                 if novalue is not None:
                     raise TypeError("None expected, got %s object" %
                                     (type(novalue).__name__,))
-                return None
         CTypesVoid._fix_class()
         return CTypesVoid
 
@@ -387,7 +386,7 @@ class CTypesBackend(object):
                     return ctype()
                 return ctype(CTypesPrimitive._to_ctypes(init))
 
-            if kind == 'int' or kind == 'byte':
+            if kind in {'int', 'byte'}:
                 @classmethod
                 def _cast_from(cls, source):
                     source = _cast_source_to_int(source)
@@ -403,7 +402,7 @@ class CTypesBackend(object):
                         source = _cast_source_to_int(source)
                     return cls(bool(source))
                 def __int__(self):
-                    return self._value
+                    return int(self._value)
 
             if kind == 'char':
                 @classmethod
@@ -435,7 +434,7 @@ class CTypesBackend(object):
 
             _cast_to_integer = __int__
 
-            if kind == 'int' or kind == 'byte' or kind == 'bool':
+            if kind in {'int', 'byte', 'bool'}:
                 @staticmethod
                 def _to_ctypes(x):
                     if not isinstance(x, (int, long)):
@@ -558,15 +557,15 @@ class CTypesBackend(object):
             def __setitem__(self, index, value):
                 self._as_ctype_ptr[index] = BItem._to_ctypes(value)
 
-            if kind == 'charp' or kind == 'voidp':
+            if kind in {'charp', 'voidp'}:
                 @classmethod
                 def _arg_to_ctypes(cls, *value):
                     if value and isinstance(value[0], bytes):
                         return ctypes.c_char_p(value[0])
                     else:
-                        return super(CTypesPtr, cls)._arg_to_ctypes(*value)
+                        return super()._arg_to_ctypes(*value)
 
-            if kind == 'charp' or kind == 'bytep':
+            if kind in {'charp', 'bytep'}:
                 def _to_string(self, maxlen):
                     if maxlen < 0:
                         maxlen = sys.maxsize
@@ -581,7 +580,7 @@ class CTypesBackend(object):
                 if getattr(self, '_own', False):
                     return 'owning %d bytes' % (
                         ctypes.sizeof(self._as_ctype_ptr.contents),)
-                return super(CTypesPtr, self)._get_own_repr()
+                return super()._get_own_repr()
         #
         if (BItem is self.ffi._get_cached_btype(model.void_type) or
             BItem is self.ffi._get_cached_btype(model.PrimitiveType('char'))):
@@ -636,6 +635,10 @@ class CTypesBackend(object):
                 if isinstance(init, bytes):
                     init = [init[i:i+1] for i in range(len(init))]
                 else:
+                    if isinstance(init, CTypesGenericArray):
+                        if (len(init) != len(blob) or
+                            not isinstance(init, CTypesArray)):
+                            raise TypeError("length/type mismatch: %s" % (init,))
                     init = tuple(init)
                 if len(init) > len(blob):
                     raise IndexError("too many initializers")
@@ -659,7 +662,7 @@ class CTypesBackend(object):
                     raise IndexError
                 self._blob[index] = BItem._to_ctypes(value)
 
-            if kind == 'char' or kind == 'byte':
+            if kind in {'char', 'byte'}:
                 def _to_string(self, maxlen):
                     if maxlen < 0:
                         maxlen = len(self._blob)
@@ -673,7 +676,7 @@ class CTypesBackend(object):
             def _get_own_repr(self):
                 if getattr(self, '_own', False):
                     return 'owning %d bytes' % (ctypes.sizeof(self._blob),)
-                return super(CTypesArray, self)._get_own_repr()
+                return super()._get_own_repr()
 
             def _convert_to_address(self, BClass):
                 if BClass in (CTypesPtr, None) or BClass._automatic_casts:
@@ -730,7 +733,8 @@ class CTypesBackend(object):
         return self._new_struct_or_union('union', name, ctypes.Union)
 
     def complete_struct_or_union(self, CTypesStructOrUnion, fields, tp,
-                                 totalsize=-1, totalalignment=-1, sflags=0):
+                                 totalsize=-1, totalalignment=-1, sflags=0,
+                                 pack=0):
         if totalsize >= 0 or totalalignment >= 0:
             raise NotImplementedError("the ctypes backend of CFFI does not support "
                                       "structures completed by verify(); please "
@@ -751,6 +755,8 @@ class CTypesBackend(object):
                 bfield_types[fname] = Ellipsis
         if sflags & 8:
             struct_or_union._pack_ = 1
+        elif pack:
+            struct_or_union._pack_ = pack
         struct_or_union._fields_ = cfields
         CTypesStructOrUnion._bfield_types = bfield_types
         #
@@ -910,7 +916,7 @@ class CTypesBackend(object):
             def _get_own_repr(self):
                 if getattr(self, '_own_callback', None) is not None:
                     return 'calling %r' % (self._own_callback,)
-                return super(CTypesFunctionPtr, self)._get_own_repr()
+                return super()._get_own_repr()
 
             def __call__(self, *args):
                 if has_varargs:
@@ -1087,7 +1093,7 @@ class CTypesBackend(object):
         return BTypePtr._from_ctypes(ptr)
 
 
-class CTypesLibrary(object):
+class CTypesLibrary:
 
     def __init__(self, backend, cdll):
         self.backend = backend

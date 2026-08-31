@@ -22,7 +22,7 @@ def qualify(quals, replace_with):
     return replace_with
 
 
-class BaseTypeByIdentity(object):
+class BaseTypeByIdentity:
     is_array_type = False
     is_raw_function = False
 
@@ -34,7 +34,7 @@ class BaseTypeByIdentity(object):
         if replace_with:
             if replace_with.startswith('*') and '&[' in result:
                 replace_with = '(%s)' % replace_with
-            elif not replace_with[0] in '[(':
+            elif replace_with[0] not in '[(':
                 replace_with = ' ' + replace_with
         replace_with = qualify(quals, replace_with)
         result = result.replace('&', replace_with)
@@ -117,8 +117,8 @@ class PrimitiveType(BasePrimitiveType):
         'float':              'f',
         'double':             'f',
         'long double':        'f',
-        'float _Complex':     'j',
-        'double _Complex':    'j',
+        '_cffi_float_complex_t': 'j',
+        '_cffi_double_complex_t': 'j',
         '_Bool':              'i',
         # the following types are not primitive in the C sense
         'wchar_t':            'c',
@@ -264,9 +264,10 @@ class PointerType(BaseType):
     def __init__(self, totype, quals=0):
         self.totype = totype
         self.quals = quals
-        extra = qualify(quals, " *&")
+        extra = " *&"
         if totype.is_array_type:
             extra = "(%s)" % (extra.lstrip(),)
+        extra = qualify(quals, extra)
         self.c_name_with_marker = totype.c_name_with_marker.replace('&', extra)
 
     def build_backend_type(self, ffi, finishlist):
@@ -307,11 +308,14 @@ class ArrayType(BaseType):
         self.c_name_with_marker = (
             self.item.c_name_with_marker.replace('&', brackets))
 
+    def length_is_unknown(self):
+        return isinstance(self.length, str)
+
     def resolve_length(self, newlength):
         return ArrayType(self.item, newlength)
 
     def build_backend_type(self, ffi, finishlist):
-        if self.length == '...':
+        if self.length_is_unknown():
             raise CDefError("cannot render the type %r: unknown length" %
                             (self,))
         self.item.get_cached_btype(ffi, finishlist)   # force the item BType
@@ -342,7 +346,7 @@ class StructOrUnion(StructOrUnionOrEnum):
     fixedlayout = None
     completed = 0
     partial = False
-    packed = False
+    packed = 0
 
     def __init__(self, name, fldnames, fldtypes, fldbitsize, fldquals=None):
         self.name = name
@@ -367,8 +371,7 @@ class StructOrUnion(StructOrUnionOrEnum):
             if (name == '' and isinstance(type, StructOrUnion)
                     and expand_anonymous_struct_union):
                 # nested anonymous struct/union
-                for result in type.enumfields():
-                    yield result
+                yield from type.enumfields()
             else:
                 yield (name, type, bitsize, quals)
 
@@ -414,11 +417,14 @@ class StructOrUnion(StructOrUnionOrEnum):
             fldtypes = [tp.get_cached_btype(ffi, finishlist)
                         for tp in self.fldtypes]
             lst = list(zip(self.fldnames, fldtypes, self.fldbitsize))
-            sflags = 0
+            extra_flags = ()
             if self.packed:
-                sflags = 8    # SF_PACKED
+                if self.packed == 1:
+                    extra_flags = (8,)    # SF_PACKED
+                else:
+                    extra_flags = (0, self.packed)
             ffi._backend.complete_struct_or_union(BType, lst, self,
-                                                  -1, -1, sflags)
+                                                  -1, -1, *extra_flags)
             #
         else:
             fldtypes = []
@@ -427,7 +433,7 @@ class StructOrUnion(StructOrUnionOrEnum):
                 fsize = fieldsize[i]
                 ftype = self.fldtypes[i]
                 #
-                if isinstance(ftype, ArrayType) and ftype.length == '...':
+                if isinstance(ftype, ArrayType) and ftype.length_is_unknown():
                     # fix the length to match the total size
                     BItemType = ftype.item.get_cached_btype(ffi, finishlist)
                     nlen, nrest = divmod(fsize, ffi.sizeof(BItemType))

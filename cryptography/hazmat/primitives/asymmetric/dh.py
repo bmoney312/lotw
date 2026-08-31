@@ -2,211 +2,252 @@
 # 2.0, and the BSD License. See the LICENSE file in the root of this repository
 # for complete details.
 
-from __future__ import absolute_import, division, print_function
+from __future__ import annotations
 
 import abc
 
-import six
-
 from cryptography import utils
+from cryptography.hazmat.bindings._rust import openssl as rust_openssl
+from cryptography.hazmat.primitives import _serialization
+
+_FFDH_DEPRECATION_MSG = (
+    "Diffie-Hellman over finite fields (FFDH) is deprecated and support "
+    "will be removed in a future release. Use a more modern key exchange "
+    "algorithm."
+)
+
+generate_parameters = rust_openssl.dh.generate_parameters
 
 
-def generate_parameters(generator, key_size, backend):
-    return backend.generate_dh_parameters(generator, key_size)
+DHPrivateNumbers = rust_openssl.dh.DHPrivateNumbers
+DHPublicNumbers = rust_openssl.dh.DHPublicNumbers
+DHParameterNumbers = rust_openssl.dh.DHParameterNumbers
 
 
-class DHPrivateNumbers(object):
-    def __init__(self, x, public_numbers):
-        if not isinstance(x, six.integer_types):
-            raise TypeError("x must be an integer.")
-
-        if not isinstance(public_numbers, DHPublicNumbers):
-            raise TypeError("public_numbers must be an instance of "
-                            "DHPublicNumbers.")
-
-        self._x = x
-        self._public_numbers = public_numbers
-
-    def __eq__(self, other):
-        if not isinstance(other, DHPrivateNumbers):
-            return NotImplemented
-
-        return (
-            self._x == other._x and
-            self._public_numbers == other._public_numbers
-        )
-
-    def __ne__(self, other):
-        return not self == other
-
-    def private_key(self, backend):
-        return backend.load_dh_private_numbers(self)
-
-    public_numbers = utils.read_only_property("_public_numbers")
-    x = utils.read_only_property("_x")
-
-
-class DHPublicNumbers(object):
-    def __init__(self, y, parameter_numbers):
-        if not isinstance(y, six.integer_types):
-            raise TypeError("y must be an integer.")
-
-        if not isinstance(parameter_numbers, DHParameterNumbers):
-            raise TypeError(
-                "parameters must be an instance of DHParameterNumbers.")
-
-        self._y = y
-        self._parameter_numbers = parameter_numbers
-
-    def __eq__(self, other):
-        if not isinstance(other, DHPublicNumbers):
-            return NotImplemented
-
-        return (
-            self._y == other._y and
-            self._parameter_numbers == other._parameter_numbers
-        )
-
-    def __ne__(self, other):
-        return not self == other
-
-    def public_key(self, backend):
-        return backend.load_dh_public_numbers(self)
-
-    y = utils.read_only_property("_y")
-    parameter_numbers = utils.read_only_property("_parameter_numbers")
-
-
-class DHParameterNumbers(object):
-    def __init__(self, p, g, q=None):
-        if (
-            not isinstance(p, six.integer_types) or
-            not isinstance(g, six.integer_types)
-        ):
-            raise TypeError("p and g must be integers")
-        if q is not None and not isinstance(q, six.integer_types):
-            raise TypeError("q must be integer or None")
-
-        if g < 2:
-            raise ValueError("DH generator must be 2 or greater")
-
-        self._p = p
-        self._g = g
-        self._q = q
-
-    def __eq__(self, other):
-        if not isinstance(other, DHParameterNumbers):
-            return NotImplemented
-
-        return (
-            self._p == other._p and
-            self._g == other._g and
-            self._q == other._q
-        )
-
-    def __ne__(self, other):
-        return not self == other
-
-    def parameters(self, backend):
-        return backend.load_dh_parameter_numbers(self)
-
-    p = utils.read_only_property("_p")
-    g = utils.read_only_property("_g")
-    q = utils.read_only_property("_q")
-
-
-@six.add_metaclass(abc.ABCMeta)
-class DHParameters(object):
+class DHParameters(metaclass=abc.ABCMeta):
     @abc.abstractmethod
-    def generate_private_key(self):
+    def generate_private_key(self) -> DHPrivateKey:
         """
         Generates and returns a DHPrivateKey.
         """
 
     @abc.abstractmethod
-    def parameter_bytes(self, encoding, format):
+    def parameter_bytes(
+        self,
+        encoding: _serialization.Encoding,
+        format: _serialization.ParameterFormat,
+    ) -> bytes:
         """
         Returns the parameters serialized as bytes.
         """
 
     @abc.abstractmethod
-    def parameter_numbers(self):
+    def parameter_numbers(self) -> DHParameterNumbers:
         """
         Returns a DHParameterNumbers.
         """
 
 
 DHParametersWithSerialization = DHParameters
+DHParameters.register(rust_openssl.dh.DHParameters)
 
 
-@six.add_metaclass(abc.ABCMeta)
-class DHPrivateKey(object):
-    @abc.abstractproperty
-    def key_size(self):
+class DHPublicKey(metaclass=abc.ABCMeta):
+    @property
+    @abc.abstractmethod
+    def key_size(self) -> int:
         """
         The bit length of the prime modulus.
         """
 
     @abc.abstractmethod
-    def public_key(self):
-        """
-        The DHPublicKey associated with this private key.
-        """
-
-    @abc.abstractmethod
-    def parameters(self):
-        """
-        The DHParameters object associated with this private key.
-        """
-
-    @abc.abstractmethod
-    def exchange(self, peer_public_key):
-        """
-        Given peer's DHPublicKey, carry out the key exchange and
-        return shared key as bytes.
-        """
-
-
-@six.add_metaclass(abc.ABCMeta)
-class DHPrivateKeyWithSerialization(DHPrivateKey):
-    @abc.abstractmethod
-    def private_numbers(self):
-        """
-        Returns a DHPrivateNumbers.
-        """
-
-    @abc.abstractmethod
-    def private_bytes(self, encoding, format, encryption_algorithm):
-        """
-        Returns the key serialized as bytes.
-        """
-
-
-@six.add_metaclass(abc.ABCMeta)
-class DHPublicKey(object):
-    @abc.abstractproperty
-    def key_size(self):
-        """
-        The bit length of the prime modulus.
-        """
-
-    @abc.abstractmethod
-    def parameters(self):
+    def parameters(self) -> DHParameters:
         """
         The DHParameters object associated with this public key.
         """
 
     @abc.abstractmethod
-    def public_numbers(self):
+    def public_numbers(self) -> DHPublicNumbers:
         """
         Returns a DHPublicNumbers.
         """
 
     @abc.abstractmethod
-    def public_bytes(self, encoding, format):
+    def public_bytes(
+        self,
+        encoding: _serialization.Encoding,
+        format: _serialization.PublicFormat,
+    ) -> bytes:
         """
         Returns the key serialized as bytes.
         """
 
+    @abc.abstractmethod
+    def __eq__(self, other: object) -> bool:
+        """
+        Checks equality.
+        """
+
+    @abc.abstractmethod
+    def __copy__(self) -> DHPublicKey:
+        """
+        Returns a copy.
+        """
+
+    @abc.abstractmethod
+    def __deepcopy__(self, memo: dict) -> DHPublicKey:
+        """
+        Returns a deep copy.
+        """
+
 
 DHPublicKeyWithSerialization = DHPublicKey
+DHPublicKey.register(rust_openssl.dh.DHPublicKey)
+
+
+class DHPrivateKey(metaclass=abc.ABCMeta):
+    @property
+    @abc.abstractmethod
+    def key_size(self) -> int:
+        """
+        The bit length of the prime modulus.
+        """
+
+    @abc.abstractmethod
+    def public_key(self) -> DHPublicKey:
+        """
+        The DHPublicKey associated with this private key.
+        """
+
+    @abc.abstractmethod
+    def parameters(self) -> DHParameters:
+        """
+        The DHParameters object associated with this private key.
+        """
+
+    @abc.abstractmethod
+    def exchange(self, peer_public_key: DHPublicKey) -> bytes:
+        """
+        Given peer's DHPublicKey, carry out the key exchange and
+        return shared key as bytes.
+        """
+
+    @abc.abstractmethod
+    def private_numbers(self) -> DHPrivateNumbers:
+        """
+        Returns a DHPrivateNumbers.
+        """
+
+    @abc.abstractmethod
+    def private_bytes(
+        self,
+        encoding: _serialization.Encoding,
+        format: _serialization.PrivateFormat,
+        encryption_algorithm: _serialization.KeySerializationEncryption,
+    ) -> bytes:
+        """
+        Returns the key serialized as bytes.
+        """
+
+    @abc.abstractmethod
+    def __copy__(self) -> DHPrivateKey:
+        """
+        Returns a copy.
+        """
+
+    @abc.abstractmethod
+    def __deepcopy__(self, memo: dict) -> DHPrivateKey:
+        """
+        Returns a deep copy.
+        """
+
+
+DHPrivateKeyWithSerialization = DHPrivateKey
+DHPrivateKey.register(rust_openssl.dh.DHPrivateKey)
+
+# Aliases that do not emit the deprecation warning on attribute access, for
+# internal use (e.g. the unions in
+# cryptography.hazmat.primitives.asymmetric.types, which are evaluated at
+# import time).
+_DHPublicKey = DHPublicKey
+_DHPrivateKey = DHPrivateKey
+
+utils.deprecated(
+    generate_parameters,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="generate_parameters",
+)
+
+utils.deprecated(
+    DHPrivateNumbers,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHPrivateNumbers",
+)
+
+utils.deprecated(
+    DHPublicNumbers,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHPublicNumbers",
+)
+
+utils.deprecated(
+    DHParameterNumbers,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHParameterNumbers",
+)
+
+utils.deprecated(
+    DHParameters,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHParameters",
+)
+
+utils.deprecated(
+    DHParameters,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHParametersWithSerialization",
+)
+
+utils.deprecated(
+    DHPublicKey,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHPublicKey",
+)
+
+utils.deprecated(
+    DHPublicKey,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHPublicKeyWithSerialization",
+)
+
+utils.deprecated(
+    DHPrivateKey,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHPrivateKey",
+)
+
+utils.deprecated(
+    DHPrivateKey,
+    __name__,
+    _FFDH_DEPRECATION_MSG,
+    utils.DeprecatedIn50,
+    name="DHPrivateKeyWithSerialization",
+)
