@@ -8,7 +8,7 @@ import boto3
 from time import sleep
 from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name, get_standings_full_name
 from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line, build_html
-from lotw import get_player_season_details
+from lotw import get_pick_details, get_player_season_details, get_game_result_string
 
 # global variables
 logger = logging.getLogger()
@@ -70,72 +70,72 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
 
     return history
 
-def get_pick_details(conn, pick_team_id, week, year):
-    """
-    Determine the classification (Favorite/Underdog), the specific line, 
-    and the Site (Home/Road) for the picked team.
-    Returns: (Classification, Line, Site) 
-             e.g. ('Favorite', -3.5, 'Home') or (None, None, None)
-    """
-    with conn.cursor() as cur:
-        # Get game details for the pick
-        table_name = "Games_{}".format(year)
-        sql = """
-            SELECT home_team_id, away_team_id, home_team_line 
-            FROM {} 
-            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
-        """.format(table_name)
-        cur.execute(sql, (week, pick_team_id, pick_team_id))
-        row = cur.fetchone()
-        
-        if not row:
-            return None, None, None
+#def get_pick_details(conn, pick_team_id, week, year):
+#    """
+#    Determine the classification (Favorite/Underdog), the specific line, 
+#    and the Site (Home/Road) for the picked team.
+#    Returns: (Classification, Line, Site) 
+#             e.g. ('Favorite', -3.5, 'Home') or (None, None, None)
+#    """
+#    with conn.cursor() as cur:
+#        # Get game details for the pick
+#        table_name = "Games_{}".format(year)
+#        sql = """
+#            SELECT home_team_id, away_team_id, home_team_line 
+#            FROM {} 
+#            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
+#        """.format(table_name)
+#        cur.execute(sql, (week, pick_team_id, pick_team_id))
+#        row = cur.fetchone()
+#        
+#        if not row:
+#            return None, None, None
+#
+#        home_team, away_team, home_line = row
+#        
+#        if home_line is None:
+#            return None, None, None
+#            
+#        # Calculate line from the perspective of the PICKED team
+#        # home_team_line is relative to Home (e.g. -3 means Home is favored)
+#        if pick_team_id == home_team:
+#            relevant_line = home_line
+#            site = "Home"
+#        else:
+#            relevant_line = -home_line
+#            site = "Road"
+#            
+#        # Determine Classification
+#        if relevant_line < 0: 
+#            cls = "Favorite"
+#        elif relevant_line > 0: 
+#            cls = "Underdog"
+#        else: 
+#            cls = "Pick'em"
+#
+#        return cls, relevant_line, site
 
-        home_team, away_team, home_line = row
-        
-        if home_line is None:
-            return None, None, None
-            
-        # Calculate line from the perspective of the PICKED team
-        # home_team_line is relative to Home (e.g. -3 means Home is favored)
-        if pick_team_id == home_team:
-            relevant_line = home_line
-            site = "Home"
-        else:
-            relevant_line = -home_line
-            site = "Road"
-            
-        # Determine Classification
-        if relevant_line < 0: 
-            cls = "Favorite"
-        elif relevant_line > 0: 
-            cls = "Underdog"
-        else: 
-            cls = "Pick'em"
-
-        return cls, relevant_line, site
-
-def get_game_result_string(conn, pick_team_id, week, year):
-    """
-    Fetch the final game score in the format: 'AwayTeam Score, HomeTeam Score'
-    using team abbreviations.
-    """
-    table_name = "Games_{}".format(year)
-    with conn.cursor() as cur:
-        sql = """
-            SELECT away_team_id, away_team_score, home_team_id, home_team_score
-            FROM {}
-            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
-        """.format(table_name)
-        cur.execute(sql, (week, pick_team_id, pick_team_id))
-        row = cur.fetchone()
-
-        if row:
-            away, a_score, home, h_score = row
-            if a_score is not None and h_score is not None:
-                return "{} {} v {} {}".format(away, a_score, home, h_score)
-
-    return "-"
+#def get_game_result_string(conn, pick_team_id, week, year):
+#    """
+#    Fetch the final game score in the format: 'AwayTeam Score, HomeTeam Score'
+#    using team abbreviations.
+#    """
+#    table_name = "Games_{}".format(year)
+#    with conn.cursor() as cur:
+#        sql = """
+#            SELECT away_team_id, away_team_score, home_team_id, home_team_score
+#            FROM {}
+#            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
+#        """.format(table_name)
+#        cur.execute(sql, (week, pick_team_id, pick_team_id))
+#        row = cur.fetchone()
+#
+#        if row:
+#            away, a_score, home, h_score = row
+#            if a_score is not None and h_score is not None:
+#                return "{} {} v {} {}".format(away, a_score, home, h_score)
+#
+#    return "-"
 
 def get_player_career_stats(conn, player_id, start_year, end_year):
     """

@@ -109,7 +109,7 @@ def lambda_handler(event, context):
     try:
         with conn.cursor() as cur:
             # Find all registration columns
-            cur.execute("SHOW COLUMNS FROM Players LIKE '%\_registration'")
+            cur.execute(r"SHOW COLUMNS FROM Players LIKE '%\_registration'")
             reg_cols = cur.fetchall()
 
             for col in reg_cols:

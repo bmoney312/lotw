@@ -8,7 +8,7 @@ import pytz
 import boto3
 from time import sleep
 from lotw import get_all_paid_players, get_all_players, get_all_current_players, get_all_picks
-from lotw import get_current_year, in_daylight_savings
+from lotw import get_current_year, in_daylight_savings, get_current_week, response, build_html
 
 # global variables
 logger = logging.getLogger()
@@ -100,7 +100,7 @@ def lambda_handler(event, context):
 
     all_weekly_picks = []
     all_weekly_picks = get_all_picks(conn, week)
-    num_weekly_picks = len(num_weekly_picks)
+    num_weekly_picks = len(all_weekly_picks)
     num_no_picks = num_current_players - num_weekly_picks
 
 #    response = cloudwatch.put_metric_data(
