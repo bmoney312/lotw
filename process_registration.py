@@ -3,15 +3,12 @@ import sys
 import json
 import pymysql
 import logging
-import datetime
-from lotw import validate_field, validate_key, get_player_info
-from lotw import get_current_pick, get_kickoff_time, get_line, get_current_year
-from lotw import build_html_message, build_html_response, send_email
-from lotw import formatted_line, response
+from lotw import validate_field, get_player_info, get_current_year
+from lotw import build_html_message, build_html_response, send_email, response
 
 # global variables
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def submit_registration(conn, player_id, registration, year):
@@ -22,9 +19,9 @@ def submit_registration(conn, player_id, registration, year):
     # update players table with new registration value
     try:
         with conn.cursor() as cur:
-            if registration == True:
+            if registration is True:
                 sql = "UPDATE `Players` SET `" + str(year) + "_registration` = 1 WHERE `player_id` = %s"
-            elif registration == False:
+            elif registration is False:
                 sql = "UPDATE `Players` SET `" + str(year) + "_registration` = 0 WHERE `player_id` = %s"
             else:
                 raise ValueError("Invalid registartion value {} for player {}".format(registration, player_id))
@@ -35,7 +32,7 @@ def submit_registration(conn, player_id, registration, year):
     except Exception as e:
         return (False, "Error updating database: {}".format(str(e)))
 
-    if registration == True:
+    if registration is True:
         message = "Your registration was updated successfully! You are signed up for LOTW this season!"
     else:
         message = "You will not be registered for LOTW this season. Hope to see you back in the future."
@@ -43,34 +40,33 @@ def submit_registration(conn, player_id, registration, year):
     return (True, message)
 
 
-
 def lambda_handler(event, context):
     """
     process_registration.py
 
-    Process LOTW sign up reqeusts 
+    Process LOTW sign up reqeusts
     """
-    
+
     logger.info("Received event: " + json.dumps(event, indent=2))
 
     db_endpoint = os.environ['db_endpoint']
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     query_string_params = event.get('queryStringParameters')
 
     if query_string_params is not None:
@@ -105,7 +101,7 @@ def lambda_handler(event, context):
     current_year = get_current_year()
     (res, message) = submit_registration(conn, player_id, registration, current_year)
 
-    payment_info ="""
+    payment_info = """
 The league fee is $50. <b>The fee is due before the season starts.</b> You will receive the weekly lines when payment is received. See payment information below.<br>
 <br>
 <b>Check:</b><br>
@@ -118,8 +114,8 @@ Lynnwood, WA 98036<br>
 <b>Venmo:</b> <a href=https://venmo.com/bmoney312>venmo.com/bmoney312</a>
 <br>
 """
-    # send email to confirm picks that were recorded successfully
-    if res is True and registration == True:
+    # send email to confirm registration was recorded successfully
+    if res is True and registration is True:
         logger.debug("sending email to player_id {}".format(player_id))
         # initialize variables
         mail_username = os.environ['mail_username']
@@ -143,9 +139,8 @@ Lynnwood, WA 98036<br>
     # close database connection
     conn.close()
 
-    if res == False:
+    if res is False:
         return response(400, 'text/html', build_html_response(message))
 
     # return result
     return response(200, 'text/html', build_html_response(message))
-
