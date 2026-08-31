@@ -18,3 +18,5 @@ build: lint test
 	@echo "Build and tests completed successfully."
 
 all: install build
+
+lotw: all
