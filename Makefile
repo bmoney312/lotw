@@ -8,8 +8,8 @@ install:
 	$(PIP) install pytest flake8 python-dateutil
 
 lint:
-	flake8 *.py --exclude=six.py --count --select=E9,F63,F7,F82 --show-source --statistics
-	flake8 *.py --exclude=six.py --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+	flake8 *.py --exclude=six.py --count --select=E9,F63,F7,F82 --extend-ignore=E501 --show-source --statistics
+	flake8 *.py --exclude=six.py --count --extend-ignore=E501 --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
 test:
 	pytest tests/

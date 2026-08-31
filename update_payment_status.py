@@ -3,16 +3,16 @@ import sys
 import json
 import pymysql
 import logging
-import datetime
 from time import sleep
-from lotw import get_current_year, get_player, get_current_year
-from lotw import build_html, build_html_head, response, validate_field, smtp_send, smtp_connect
+from lotw import get_current_year, get_player, build_html, build_html_head
+from lotw import response, validate_field, smtp_send, smtp_connect
 
 # Mark a player paid
 
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
 
 def mark_player_paid(conn, player_id, year):
     """
@@ -54,16 +54,16 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
@@ -77,7 +77,7 @@ def lambda_handler(event, context):
 
     player_id = os.environ.get('player_id')
     current_year = get_current_year()
-    
+
     if request_type == "Scheduled Event":
         logger.debug("Scheduled Event")
         logger.error("Cannot run as Scheduled Event, exiting")
@@ -151,4 +151,3 @@ def lambda_handler(event, context):
 
     # return result
     return response(200, 'text/html', build_html("Successfully marked player {} {} {} as paid for {}".format(player_id, first_name, last_name, current_year)))
-
