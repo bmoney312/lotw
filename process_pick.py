@@ -17,10 +17,10 @@ logger.setLevel(logging.INFO)
 def submit_pick(conn, player_id, pick, week):
     """
     Submit new pick for player player_id in given week.
-    
+
     Checks current time against any existing picks to confirm existing pick
     is not already locked in.
-    
+
     Returns (result, pick, line, message)
     result: boolean value, 1 successful update, 0 failed update
     new_pick: team_id value for new pick if success, existing pick if failure
@@ -28,7 +28,7 @@ def submit_pick(conn, player_id, pick, week):
     message: string with message of success or reason for failure
     """
     (current_pick_id, current_pick, current_line, current_pick_ats, is_locked_in) = get_current_pick(conn, player_id, week)
-    
+
     # if pick is locked in do not allow change
     if is_locked_in:
         message = "Your week {} pick ".format(week) + current_pick + " " + formatted_line(current_line) + " is already locked in, " + "the game has started."
@@ -64,11 +64,11 @@ def submit_pick(conn, player_id, pick, week):
     try:
         with conn.cursor() as cur:
             sql = "INSERT INTO `Picks_" + str(get_current_year()) + "` (`player_id`, `week`, `pick`, `submit_time`, `lock_in_time`) VALUES (%s, %s, %s, %s, %s)"
-            logger.debug("submit_pick(): ".format(sql))
+            logger.debug("submit_pick(): {}".format(sql))
             cur.execute(sql, (player_id, week, pick, time_now, kickoff_time))
             # set lock_in_time current pick to NULL which invalidates pick
             sql = "UPDATE `Picks_" + str(get_current_year()) + "` SET `lock_in_time` = NULL WHERE `pick_id` = %s"
-            logger.debug("submit_pick(): ".format(sql))
+            logger.debug("submit_pick(): {}".format(sql))
             cur.execute(sql, (current_pick_id, ))
             conn.commit()
     except Exception as e:
@@ -81,64 +81,63 @@ def submit_pick(conn, player_id, pick, week):
     return (True, pick, line, message)
 
 
-
 def lambda_handler(event, context):
     """
     process_pick.py
 
     Process LOTW picks
     """
-    
+
     logger.info("Received event: " + json.dumps(event, indent=2))
 
     db_endpoint = os.environ['db_endpoint']
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     # validate input
     if not validate_key(event, 'body'):
         return response(400, 'text/html', build_html_response("Bad Request [body]"))
-    
+
     # read body of request
     input_body = event['body']
     tokens = input_body.split('&')
-    params = { }
+    params = {}
     for t in tokens:
-        (key,value) = t.split('=')
+        (key, value) = t.split('=')
         params[key] = value
-    
-    logger.debug("params: ".format(params))
-    
+
+    logger.debug("params: {}".format(params))
+
     # check input parameters
     if not validate_key(params, 'pick'):
         return response(400, 'text/html', build_html_response("Bad Request [pick]"))
     else:
         pick = params['pick']
-    
+
     if not validate_key(params, 'week'):
         return response(400, 'text/html', build_html_response("Bad Request [week]"))
     else:
         week = params['week']
-        
+
     if not validate_key(params, 'player_id'):
         return response(400, 'text/html', build_html_response("Bad Request [player_id]"))
     else:
         player_id = params['player_id']
-    
+
     logger.debug("validating input fields")
 
     # validate pick is valid team
@@ -147,10 +146,10 @@ def lambda_handler(event, context):
 
     if not validate_field(conn, player_id, 'player_id', 'Players'):
         return response(400, 'text/html', build_html_response("invalid player {}".format(player_id)))
-        
+
     if not validate_field(conn, week, 'week', "Games_" + str(get_current_year())):
         return response(400, 'text/html', build_html_response("invalid week {}".format(week)))
-    
+
     logger.debug("calling submit_pick()")
     (res, new_pick, new_line, message) = submit_pick(conn, player_id, pick, week)
 
@@ -181,4 +180,3 @@ def lambda_handler(event, context):
 
     # return result
     return response(200, 'text/html', build_html_response(message))
-
