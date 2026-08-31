@@ -4,16 +4,13 @@ import json
 import pymysql
 import logging
 import datetime
-import pytz
-import boto3
-from time import sleep
+# import boto3
 from lotw import get_all_paid_players, get_all_players, get_all_current_players, get_all_picks
-from lotw import get_current_year, in_daylight_savings, get_current_week, response, build_html
+from lotw import get_current_week, response, build_html
 
 # global variables
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
+logger.setLevel(logging.INFO)
 
 
 def lambda_handler(event, context):
@@ -32,29 +29,29 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
 
-    logger.info("Instantiating cloudwatch object")
-    cloudwatch = boto3.client('cloudwatch')
-    
+    # logger.info("Instantiating cloudwatch object")
+    # cloudwatch = boto3.client('cloudwatch')
+
     # initialize variables
-    #mail_username = os.environ['mail_username']
-    #mail_password = os.environ['mail_password']
-    #mail_host = os.environ['mail_host']
-    #mail_port = os.environ['mail_port']
-    #mail_from = '"Brendan Connell" <bmoney312@gmail.com>'
+    # mail_username = os.environ['mail_username']
+    # mail_password = os.environ['mail_password']
+    # mail_host = os.environ['mail_host']
+    # mail_port = os.environ['mail_port']
+    # mail_from = '"Brendan Connell" <bmoney312@gmail.com>'
 
     # determine current week
     week = get_current_week(conn)
@@ -73,17 +70,16 @@ def lambda_handler(event, context):
 
     logger.info("Gathering database metrics...")
 
-    #weekday = time_now.weekday()
-    #dst = in_daylight_savings()
+    # weekday = time_now.weekday()
+    # dst = in_daylight_savings()
 
     # get standings and current picks
-    #player_picks = get_picks_at_kickoff_time(conn, week, pick_deadline, send_pick_summary)
-    #logger.debug("player_picks: {}".format(player_picks))
+    # player_picks = get_picks_at_kickoff_time(conn, week, pick_deadline, send_pick_summary)
+    # logger.debug("player_picks: {}".format(player_picks))
     # get_all_paid_players, get_all_players, get_all_current_players, get_all_picks
 
-    #if len(player_picks) == 0:
+    # if len(player_picks) == 0:
     #    return response(200, 'text/html', build_html("No picks found that locked in at {}".format(pick_deadline)))
-
 
     paid_players = []
     paid_players = get_all_paid_players(conn)
@@ -102,6 +98,8 @@ def lambda_handler(event, context):
     all_weekly_picks = get_all_picks(conn, week)
     num_weekly_picks = len(all_weekly_picks)
     num_no_picks = num_current_players - num_weekly_picks
+
+    logger.info("paid: {}, not paid: {}, all: {}, no picks: {}".format(str(num_paid_players), str(num_not_paid_players), str(num_all_players), str(num_no_picks)))
 
 #    response = cloudwatch.put_metric_data(
 #        MetricData = [
@@ -124,10 +122,8 @@ def lambda_handler(event, context):
 #        Namespace='lotw'
 #    )
 
-
     # close database connection
     conn.close()
 
     # return result
     return response(200, 'text/html', build_html("Metrics published to CloudWatch successfully."))
-
