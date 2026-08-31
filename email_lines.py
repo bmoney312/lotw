@@ -8,7 +8,7 @@ import boto3
 from time import sleep
 from lotw import get_current_week, get_all_paid_players, get_player, get_current_pick, get_team_name
 from lotw import get_auth_token, create_auth_token, datetime_to_string, get_current_year
-from lotw import build_html, formatted_line, response, send_email, smtp_connect, smtp_send
+from lotw import build_html, formatted_line, response, smtp_connect, smtp_send
 
 # global variables
 logger = logging.getLogger()
@@ -55,8 +55,6 @@ def build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, hom
 """.format(f_kickoff_time, week, player_id, away_team_id, token, away_team_name, week, player_id, home_team_id, token, home_team_name, game_line)
 
     return table_row
-
-
 
 
 def build_lines_email_head():
@@ -106,7 +104,6 @@ def build_lines_email_head():
     return html
 
 
-
 def build_lines_email_body(conn, player_id, week, token):
     """
     Given database connection and current week, return body of
@@ -145,7 +142,7 @@ def build_lines_email_body(conn, player_id, week, token):
             logger.debug("build_lines_email_body(): processing row {} {} {} {}".format(kickoff_time, away_team_id, home_team_id, home_team_line))
             html_row = build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token)
             html = html + html_row
-    
+
     html = html + "</table><p>&#42;&#42;<font size=-1><b>all times US/Eastern timezone</b></font></p><br>"
     html = html + "<br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
     return html
@@ -193,20 +190,20 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
@@ -219,7 +216,7 @@ def lambda_handler(event, context):
         MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
     except ValueError:
         MAX_RETRIES = 5
-    
+
     try:
         RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
     except ValueError:
@@ -290,7 +287,7 @@ def lambda_handler(event, context):
         auth_token = get_auth_token(conn, player_id, week)
         if auth_token is None:
             logger.info("Creating new auth token for player_id {} week {}".format(player_id, week))
-            auth_token = create_auth_token(conn, player_id, week)            
+            auth_token = create_auth_token(conn, player_id, week)
         else:
             logger.info("Found existing auth token for player_id {} week {}".format(player_id, week))
 
@@ -342,12 +339,12 @@ def lambda_handler(event, context):
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
-            
+
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
                 emails_sent_count += 1
-                break # Exit retry loop on success
+                break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
@@ -361,7 +358,7 @@ def lambda_handler(event, context):
 
                     if smtp_relay is None:
                         logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break # Break retry loop if reconnect fails
+                        break  # Break retry loop if reconnect fails
                 else:
                     logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
 
@@ -384,7 +381,7 @@ def lambda_handler(event, context):
             # return error if all players do not receive email
             logger.info("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
             raise RuntimeError("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
-            #return response(504, 'text/html', build_html("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
+            # return response(504, 'text/html', build_html("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
         # gentle pacing
         sleep(2)
@@ -401,4 +398,3 @@ def lambda_handler(event, context):
     # return result
     logger.info("Lines for week {} sent successfully.".format(week))
     return response(200, 'text/html', build_html("Lines for week {} sent successfully.".format(week)))
-
