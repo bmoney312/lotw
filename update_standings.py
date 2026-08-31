@@ -10,7 +10,7 @@ from lotw import build_html, response
 
 # global variables
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def get_player_streak(conn, player_id, current_standings_week):
