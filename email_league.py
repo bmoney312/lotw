@@ -5,8 +5,8 @@ import pymysql
 import logging
 import datetime
 from time import sleep
-from lotw import get_current_week, get_commish_message, get_player, get_all_paid_players
-from lotw import build_html, response, build_html_head, send_email, smtp_connect, smtp_send
+from lotw import get_commish_message, get_player, get_all_paid_players
+from lotw import build_html, response, build_html_head, smtp_connect, smtp_send
 
 # global variables
 logger = logging.getLogger()
@@ -29,20 +29,20 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
@@ -55,7 +55,7 @@ def lambda_handler(event, context):
         MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
     except ValueError:
         MAX_RETRIES = 5
-    
+
     try:
         RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
     except ValueError:
@@ -127,11 +127,11 @@ def lambda_handler(event, context):
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
-            
+
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
-                break # Exit retry loop on success
+                break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
@@ -145,14 +145,14 @@ def lambda_handler(event, context):
 
                     if smtp_relay is None:
                         logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break # Break retry loop if reconnect fails
+                        break  # Break retry loop if reconnect fails
                 else:
                     logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
 
         # If all retries failed, log and handle
         if not email_sent_successfully:
             logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
-            
+
             if smtp_relay is None:
                 logger.error("SMTP connection is dead.")
             else:
@@ -163,7 +163,7 @@ def lambda_handler(event, context):
             conn.close()
 
             raise RuntimeError("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES))
-            #return response(504, 'text/html', build_html("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
+            # return response(504, 'text/html', build_html("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
@@ -176,4 +176,3 @@ def lambda_handler(event, context):
 
     # return result
     return response(200, 'text/html', build_html("Commish message message_id {} sent successfully.".format(message_id)))
-
