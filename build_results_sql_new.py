@@ -4,10 +4,8 @@ import json
 import pymysql
 import logging
 import urllib.request
-import re
 from html.parser import HTMLParser
-from lotw import get_current_week, get_current_year, get_all_games
-from lotw import response, build_html
+from lotw import get_current_week, get_current_year, get_all_games, response
 
 # global variables
 logger = logging.getLogger()
@@ -33,7 +31,7 @@ NICKNAME_TO_ID = {v.lower(): k for k, v in TEAM_NICKNAMES_MAP.items()}
 for k in TEAM_NICKNAMES_MAP.keys():
     NICKNAME_TO_ID[k.lower()] = k
 # Handle old Oakland code if necessary, ensuring Raiders maps to LVR for 2025
-NICKNAME_TO_ID['raiders'] = 'LVR' 
+NICKNAME_TO_ID['raiders'] = 'LVR'
 
 
 class NFLScoreParser(HTMLParser):
@@ -43,7 +41,7 @@ class NFLScoreParser(HTMLParser):
     """
     def __init__(self):
         super().__init__()
-        self.found_items = [] # List of {'type': 'team'|'score', 'value': ...}
+        self.found_items = []  # List of {'type': 'team'|'score', 'value': ...}
         self.current_data = []
 
     def handle_data(self, data):
@@ -65,16 +63,17 @@ class NFLScoreParser(HTMLParser):
                     self.found_items.append({'type': 'team', 'value': tid})
                     found_team = True
                     break
-        
+
         if found_team:
             return
 
         # Check if data is a score (integer)
         # We assume scores are typically between 0 and 99
         if clean_data.isdigit():
-             val = int(clean_data)
-             if 0 <= val < 100: 
-                 self.found_items.append({'type': 'score', 'value': val})
+            val = int(clean_data)
+            if 0 <= val < 100:
+                self.found_items.append({'type': 'score', 'value': val})
+
 
 def fetch_web_scores(week):
     """
@@ -137,6 +136,7 @@ def fetch_web_scores(week):
     logger.info("Parsed scores for teams: {}".format(list(team_scores.keys())))
     return team_scores
 
+
 def generate_sql_lines(conn, week):
     """
     Generate SQL UPDATE statements for the given week using web scores.
@@ -194,7 +194,7 @@ def lambda_handler(event, context):
 
     request_type = event.get('detail-type')
     if request_type is None:
-         request_type = "manual_run"
+        request_type = "manual_run"
 
     db_endpoint = os.environ['db_endpoint']
     db_port = int(os.environ['db_port'])
@@ -206,10 +206,10 @@ def lambda_handler(event, context):
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name, connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
