@@ -4,13 +4,12 @@ import json
 import pymysql
 import logging
 import datetime
-import pytz
 import boto3
 from zoneinfo import ZoneInfo
 from time import sleep
-from lotw import get_current_week, get_all_paid_players, get_player, get_line, get_current_year, in_daylight_savings
-from lotw import get_all_picks, get_current_pick, get_standings, get_standings_full_name
-from lotw import build_html, formatted_line, response, send_email, smtp_connect, smtp_send
+from lotw import get_current_week, get_all_paid_players, get_player, get_line
+from lotw import get_standings, get_standings_full_name, get_current_year
+from lotw import build_html, formatted_line, response, smtp_connect, smtp_send
 
 # global variables
 logger = logging.getLogger()
@@ -65,7 +64,6 @@ def build_picks_html_row(rank, full_name, wins, losses, ats_points, streak, pick
     return table_row
 
 
-
 def build_picks_email_head():
     """
     Build picks email head
@@ -113,7 +111,6 @@ def build_picks_email_head():
     return html
 
 
-
 def build_picks_email_body(week, standings, current_picks, message, send_pick_summary, current_player_id, conn):
     """
     Given database connection and current week, return body of
@@ -140,7 +137,6 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
     else:
         html += "<h4>LOTW: WEEK {} PICKS</h4>\n".format(week)
 
-    #html += "<h4>LOTW: WEEK {} PICKS</h4>\n".format(week)
     html += """
 <table>
 <tr>
@@ -152,7 +148,7 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
     <th>Streak</th>
     <th>Week {} Pick</th>
 </tr>
-""".format(week, week)
+""".format(week)
 
     # Determine if the full slate has started
     all_games_started = is_week_fully_started(conn, week)
@@ -199,7 +195,7 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         rank += 1
 
     # end for
-    
+
     html = html + "</table>"
     html = html + "<br><br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
     return html
@@ -230,6 +226,7 @@ def get_picks_at_kickoff_time(conn, week, lock_in_time, send_pick_summary):
 
         logger.debug("get_picks_at_kickoff_time(): Found these picks at kickoff time {}: {}".format(lock_in_time, picks))
         return picks
+
 
 def emit_emails_sent_metric(week, emails_sent_count):
     # Emit the metric emails_sent_count
@@ -273,20 +270,20 @@ def lambda_handler(event, context):
     db_port = int(os.environ['db_port'])
     db_username = os.environ['db_username']
     db_password = os.environ['db_password']
-    db_name = db=os.environ['db_name']
+    db_name = os.environ['db_name']
 
     logger.info("Connecting to MySQL database {}".format(db_endpoint))
 
     try:
         conn = pymysql.connect(host=db_endpoint, port=db_port,
-                                user=db_username, passwd=db_password,
-                                db=db_name,connect_timeout=5)
-    except:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database")
+                               user=db_username, passwd=db_password,
+                               db=db_name, connect_timeout=5)
+    except Exception as e:
+        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
-    
+
     # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
@@ -339,7 +336,7 @@ def lambda_handler(event, context):
 
     # current time, set second and microsecond to 0 to match kickoff times
     time_now = datetime.datetime.now().replace(second=0, microsecond=0)
-    #time_now = datetime.datetime.now().replace(minute=15, second=0, microsecond=0)
+    # time_now = datetime.datetime.now().replace(minute=15, second=0, microsecond=0)
 
     # set pick deadline to current time
     # scheduled events should align with game times to the minute
@@ -379,9 +376,8 @@ def lambda_handler(event, context):
         commish_message = "The picks below are now <b>locked in</b>. Good luck! -BMC<br>"
 
         # add Thursday night special message
-        #weekday = time_now.weekday()
         weekday = time_now.astimezone(ZoneInfo("America/New_York")).weekday()
-        hour = time_now.hour # hour in UTC, Thursday night is Friday morning UTC
+        hour = time_now.hour  # hour in UTC, Thursday night is Friday morning UTC
         if (weekday == 3) and (hour < 4):
             commish_message = "The following players like the Thursday night special. " + commish_message
 
@@ -440,12 +436,12 @@ def lambda_handler(event, context):
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
-            
+
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
                 emails_sent_count += 1
-                break # Exit retry loop on success
+                break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
@@ -459,20 +455,20 @@ def lambda_handler(event, context):
 
                     if smtp_relay is None:
                         logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break # Break retry loop if reconnect fails
+                        break  # Break retry loop if reconnect fails
                 else:
                     logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
 
         # If all retries failed, log and handle
         if not email_sent_successfully:
             logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
-            
+
             if smtp_relay is None:
                 logger.error("SMTP connection is dead.")
             else:
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
-            
+
             # close database connection
             conn.close()
 
@@ -480,7 +476,7 @@ def lambda_handler(event, context):
             emit_emails_sent_metric(week, emails_sent_count)
             logger.info("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
             raise RuntimeError("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
-            #return response(504, 'text/html', build_html("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
+            # return response(504, 'text/html', build_html("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
@@ -497,4 +493,3 @@ def lambda_handler(event, context):
     # return result
     logger.info("Picks for week {} sent successfully. Exiting. [200]".format(week))
     return response(200, 'text/html', build_html("Picks for week {} sent successfully.".format(week)))
-
