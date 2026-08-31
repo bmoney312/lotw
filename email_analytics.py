@@ -3,12 +3,11 @@ import sys
 import json
 import pymysql
 import logging
-import datetime
 import boto3
 from time import sleep
-from lotw import get_current_year, get_current_week, get_all_paid_players, get_player, get_team_name, get_standings_full_name
-from lotw import build_html_head, response, smtp_connect, smtp_send, get_standings, formatted_line, build_html
-from lotw import get_pick_details, get_player_season_details, get_game_result_string
+from lotw import get_current_year, get_current_week, get_all_paid_players, get_player
+from lotw import response, smtp_connect, smtp_send, get_standings, get_standings_full_name
+from lotw import get_pick_details, get_player_season_details, get_team_name
 
 # global variables
 logger = logging.getLogger()
@@ -16,6 +15,7 @@ logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
 # --- Helper Functions ---
+
 
 def get_player_yearly_history(conn, player_id, start_year, end_year):
     """
@@ -40,15 +40,17 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
                 cur.execute(sql, (player_id,))
                 rows = cur.fetchall()
 
-            w = 0
-            l = 0
+            wins = 0
+            losses = 0
             played = False
             for row in rows:
                 pick_ats = row[0]
                 if pick_ats is not None:
                     played = True
-                    if pick_ats > 0: w += 1
-                    elif pick_ats <= 0: l += 1 # Counts Push as Loss per existing logic
+                    if pick_ats > 0:
+                        wins += 1
+                    elif pick_ats <= 0:
+                        losses += 1  # Counts Push as Loss per existing logic
 
             if played:
                 # Adjust record for missing weeks in past seasons
@@ -58,11 +60,11 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
                     else:
                         season_weeks = 22
 
-                    total_picks = w + l
+                    total_picks = wins + losses
                     if total_picks < season_weeks:
-                        l += (season_weeks - total_picks)
+                        losses += (season_weeks - total_picks)
 
-                history.append({'year': year, 'w': w, 'l': l})
+                history.append({'year': year, 'w': wins, 'l': losses})
 
         except Exception:
             # Table might not exist for that year or future year
@@ -70,32 +72,32 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
 
     return history
 
-#def get_pick_details(conn, pick_team_id, week, year):
+# def get_pick_details(conn, pick_team_id, week, year):
 #    """
-#    Determine the classification (Favorite/Underdog), the specific line, 
+#    Determine the classification (Favorite/Underdog), the specific line,
 #    and the Site (Home/Road) for the picked team.
-#    Returns: (Classification, Line, Site) 
+#    Returns: (Classification, Line, Site)
 #             e.g. ('Favorite', -3.5, 'Home') or (None, None, None)
 #    """
 #    with conn.cursor() as cur:
 #        # Get game details for the pick
 #        table_name = "Games_{}".format(year)
 #        sql = """
-#            SELECT home_team_id, away_team_id, home_team_line 
-#            FROM {} 
+#            SELECT home_team_id, away_team_id, home_team_line
+#            FROM {}
 #            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
 #        """.format(table_name)
 #        cur.execute(sql, (week, pick_team_id, pick_team_id))
 #        row = cur.fetchone()
-#        
+#
 #        if not row:
 #            return None, None, None
 #
 #        home_team, away_team, home_line = row
-#        
+#
 #        if home_line is None:
 #            return None, None, None
-#            
+#
 #        # Calculate line from the perspective of the PICKED team
 #        # home_team_line is relative to Home (e.g. -3 means Home is favored)
 #        if pick_team_id == home_team:
@@ -104,18 +106,18 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
 #        else:
 #            relevant_line = -home_line
 #            site = "Road"
-#            
+#
 #        # Determine Classification
-#        if relevant_line < 0: 
+#        if relevant_line < 0:
 #            cls = "Favorite"
-#        elif relevant_line > 0: 
+#        elif relevant_line > 0:
 #            cls = "Underdog"
-#        else: 
+#        else:
 #            cls = "Pick'em"
 #
 #        return cls, relevant_line, site
 
-#def get_game_result_string(conn, pick_team_id, week, year):
+# def get_game_result_string(conn, pick_team_id, week, year):
 #    """
 #    Fetch the final game score in the format: 'AwayTeam Score, HomeTeam Score'
 #    using team abbreviations.
@@ -137,6 +139,7 @@ def get_player_yearly_history(conn, player_id, start_year, end_year):
 #
 #    return "-"
 
+
 def get_player_career_stats(conn, player_id, start_year, end_year):
     """
     Aggregate wins, losses, fav counts, dog counts from start_year to end_year.
@@ -147,7 +150,7 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
     total_dog = 0
     total_pickem = 0
 
-    current_year_val = get_current_year() #
+    current_year_val = get_current_year()
 
     for year in range(start_year, end_year + 1):
         try:
@@ -174,14 +177,19 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
 
                     # W/L Record
                     if pick_ats is not None:
-                        if pick_ats > 0: year_wins += 1
-                        elif pick_ats <= 0: year_losses += 1
+                        if pick_ats > 0:
+                            year_wins += 1
+                        elif pick_ats <= 0:
+                            year_losses += 1
 
                     # Fav/Dog Record
-                    cls, _, _ = get_pick_details(conn, pick, week, year) # unpack tuple, ignore line and site
-                    if cls == "Favorite": total_fav += 1
-                    elif cls == "Underdog": total_dog += 1
-                    elif cls == "Pick'em": total_pickem +=1
+                    cls, _, _ = get_pick_details(conn, pick, week, year)  # unpack tuple, ignore line and site
+                    if cls == "Favorite":
+                        total_fav += 1
+                    elif cls == "Underdog":
+                        total_dog += 1
+                    elif cls == "Pick'em":
+                        total_pickem += 1
 
                 # if player has any picks this year
                 if len(rows) > 0:
@@ -201,9 +209,11 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
                     total_losses += year_losses
 
         except Exception as e:
+            logger.warning("WARN: {}".format(str(e)))
             continue
 
     return total_wins, total_losses, total_fav, total_dog, total_pickem
+
 
 def get_team_ats_records(conn, year):
     """
@@ -225,9 +235,9 @@ def get_team_ats_records(conn, year):
 
         # Initialize dict entry if not exists
         if home not in team_stats:
-            team_stats[home] = {'w':0, 'l':0, 'hw':0, 'hl':0, 'aw':0, 'al':0}
+            team_stats[home] = {'w': 0, 'l': 0, 'hw': 0, 'hl': 0, 'aw': 0, 'al': 0}
         if away not in team_stats:
-            team_stats[away] = {'w':0, 'l':0, 'hw':0, 'hl':0, 'aw':0, 'al':0}
+            team_stats[away] = {'w': 0, 'l': 0, 'hw': 0, 'hl': 0, 'aw': 0, 'al': 0}
 
         # Home Result
         if home_ats > 0:
@@ -248,22 +258,23 @@ def get_team_ats_records(conn, year):
     # Convert to list and sort
     results = []
     for team_id, stats in team_stats.items():
-        w = stats['w']
-        l = stats['l']
-        total = w + l
-        pct = (w / total) if total > 0 else 0.0
+        wins = stats['w']
+        losses = stats['l']
+        total = wins + losses
+        pct = (wins / total) if total > 0 else 0.0
 
         # Resolve full name (e.g., "Denver Broncos")
         full_name = get_team_name(conn, team_id)
         if full_name is None:
-            full_name = team_id # Fallback
+            full_name = team_id  # Fallback
 
         # Append expanded stats to results tuple
-        results.append((full_name, w, l, pct, stats['hw'], stats['hl'], stats['aw'], stats['al']))
+        results.append((full_name, wins, losses, pct, stats['hw'], stats['hl'], stats['aw'], stats['al']))
 
     # Sort by Win % desc, then Wins desc
     results.sort(key=lambda x: (x[3], x[1]), reverse=True)
     return results
+
 
 def get_all_career_standings(conn, start_year, end_year):
     """
@@ -300,6 +311,7 @@ def get_all_career_standings(conn, start_year, end_year):
     # Sort by Win % (index 4), then Wins (index 2)
     career_standings.sort(key=lambda x: (x[4], x[2]), reverse=True)
     return career_standings
+
 
 # --- HTML Builders ---
 
@@ -371,23 +383,23 @@ def build_analytics_html(
     # Year-by-Year Record
     html += "<h4>Career Record by Year</h4>"
     html += "<table><tr><th>Year</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
-    
+
     total_w = 0
     total_l = 0
-    
+
     for row in yearly_history:
-        y = row['year']
-        w = row['w']
-        l = row['l']
-        total_w += w
-        total_l += l
-        pct = (w / (w+l) * 100) if (w+l) > 0 else 0.0
-        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(y, w, l, pct)
-    
+        year = row['year']
+        wins = row['w']
+        losses = row['l']
+        total_w += wins
+        total_l += losses
+        pct = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0.0
+        html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(year, wins, losses, pct)
+
     # Total Row for new table
-    t_pct = (total_w / (total_w+total_l) * 100) if (total_w+total_l) > 0 else 0.0
+    t_pct = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0.0
     html += "<tr style='font-weight:bold; background-color:#e6e6e6'><td>Total</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(total_w, total_l, t_pct)
-    
+
     html += "</table><br><br>"
 
     # 4. All Players Career Records
@@ -422,6 +434,7 @@ def build_analytics_html(
     html += "</body></html>"
     return html
 
+
 def emit_emails_sent_metric(week, emails_sent_count):
     # Emit the metric emails_sent_count
     retval = False
@@ -447,6 +460,7 @@ def emit_emails_sent_metric(week, emails_sent_count):
 
     return retval
 
+
 # --- Main Lambda Handler ---
 
 def lambda_handler(event, context):
@@ -454,9 +468,9 @@ def lambda_handler(event, context):
     Generate and email analytics reports.
     """
     logger.info("Received event: " + json.dumps(event, indent=2))
-    
+
     request_type = event.get('detail-type', 'manual_run')
-    
+
     # DB Connection
     db_endpoint = os.environ['db_endpoint']
     db_port = int(os.environ['db_port'])
@@ -475,20 +489,20 @@ def lambda_handler(event, context):
     mail_password = os.environ['mail_password']
     mail_host = os.environ['mail_host']
     mail_port = os.environ['mail_port']
-    mail_from = '"Brendan Connell" <bmoney312@gmail.com>' # Or generic sender
+    mail_from = '"Brendan Connell" <bmoney312@gmail.com>'  # Or generic sender
 
     # --- Retry Configuration ---
     try:
         MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
     except ValueError:
         MAX_RETRIES = 5
-    
+
     try:
         RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
     except ValueError:
         RETRY_SLEEP_SECONDS = 15
     # --- End Retry Configuration ---
-    
+
     current_year = get_current_year()
 
     # determine current week
@@ -529,17 +543,17 @@ def lambda_handler(event, context):
 
     # --- Pre-calculate Global Stats (Shared across all emails) ---
     logger.info("Calculating Global Stats...")
-    
+
     # 1. Team ATS Records for current year
     team_ats_records = get_team_ats_records(conn, current_year)
-    
+
     # 2. All Players Career Standings (2018 to Current)
     all_career_standings = get_all_career_standings(conn, 2018, current_year)
-    
+
     # 3. Current Year Standings (to get rank)
-    current_standings = get_standings(conn) # List of tuples, need to parse to find rank
+    current_standings = get_standings(conn)  # List of tuples, need to parse to find rank
     total_players_season = len(current_standings)
-    
+
     # Connect SMTP
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
     if not smtp_relay:
@@ -557,15 +571,15 @@ def lambda_handler(event, context):
                 continue
 
         logger.info("Generating report for {} {} ({})".format(first, last, p_id))
-        
+
         # 1. Get Current Season Details
         weekly_data, s_fav, s_dog, s_pickem = get_player_season_details(conn, p_id, current_year)
-        
+
         # Find Rank and Record from current standings
         s_wins = 0
         s_losses = 0
         rank = "-"
-        
+
         # Standings tuple: (id, last, first, titles, rookie, wins, losses, win_pct, ats, streak)
         # We iterate to find the player and their index (rank)
         for i, row in enumerate(current_standings):
@@ -574,7 +588,7 @@ def lambda_handler(event, context):
                 s_wins = row[5]
                 s_losses = row[6]
                 break
-        
+
         # 2. Get Career Stats (Player specific)
         logger.info("Generating career stats for {} {} ({})".format(first, last, p_id))
         c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(conn, p_id, 2018, current_year)
@@ -592,7 +606,7 @@ def lambda_handler(event, context):
             yearly_history,
             p_id
         )
-        
+
         report_week = 1
         if current_week > 1:
             report_week = current_week - 1
@@ -603,12 +617,12 @@ def lambda_handler(event, context):
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, subject, html_body, [p_email, 'bmoney312@gmail.com'], mail_from)
-            
+
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
                 email_sent_successfully = True
                 emails_sent_count += 1
-                break # Exit retry loop on success
+                break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(p_id, p_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
@@ -622,7 +636,7 @@ def lambda_handler(event, context):
 
                     if smtp_relay is None:
                         logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break # Break retry loop if reconnect fails
+                        break  # Break retry loop if reconnect fails
                 else:
                     logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, p_id, p_email))
 
@@ -645,7 +659,7 @@ def lambda_handler(event, context):
             # return error if all players do not receive email
             logger.info("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES))
             raise RuntimeError("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES))
-            #return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
+            # return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
