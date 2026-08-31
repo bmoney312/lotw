@@ -11,11 +11,7 @@ from lotw import response, build_html
 
 # global variables
 logger = logging.getLogger()
-<<<<<<< HEAD
-logger.setLevel(logging.DEBUG)
-=======
 logger.setLevel(logging.INFO)
->>>>>>> origin/main
 
 # Team ID to Nickname mapping based on user provided table
 # Note: 'Raiders' appears twice (LVR, OAK). Defaulting 'Raiders' to 'LVR' for 2025.
@@ -91,10 +87,8 @@ def fetch_web_scores(week):
     team_scores = {}
     
     items = parser.found_items
-<<<<<<< HEAD
     logger.debug(f"Items: {items}")
-=======
->>>>>>> origin/main
+
     for i in range(len(items) - 1):
         current = items[i]
         next_item = items[i+1]
