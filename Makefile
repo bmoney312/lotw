@@ -12,7 +12,7 @@ lint:
 	flake8 *.py --extend-ignore=E501,C901 --exclude=six.py --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
 test:
-	python3 -m unittest tests/test_basic.py
+	python3 -m pytest tests/test_basic.py -v
 
 build: lint test
 	@echo "Tests completed successfully."
