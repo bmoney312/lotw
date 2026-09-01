@@ -6,3 +6,4 @@ asn1crypto>=1.5.1
 idna>=3.7
 pytz>=2024.2
 six>=1.16.0
+python-dateutil
