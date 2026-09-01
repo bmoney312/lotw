@@ -26,7 +26,11 @@ import process_pick
 import email_picks
 import update_standings
 import emit_lotw_metrics
-
+import email_registration
+import process_registration
+import add_lotw_player
+import email_analytics
+import email_lines
 
 class TestAPIProcessing(unittest.TestCase):
     
@@ -164,3 +168,146 @@ class TestMetricsEmission(unittest.TestCase):
         # 4. Assertions
         self.assertEqual(response['statusCode'], 200)
         self.assertTrue(mock_cloudwatch.put_metric_data.called)
+
+class TestRegistrationFlow(unittest.TestCase):
+
+    @patch('process_registration.pymysql.connect')
+    @patch('process_registration.validate_field')
+    @patch('process_registration.submit_registration')
+    @patch('process_registration.get_player_info')
+    @patch('process_registration.send_email')
+    def test_process_registration_success(self, mock_send_email, mock_get_player_info, mock_submit, mock_validate, mock_connect):
+        # Setup mocks for receiving a player's opt-in choice
+        mock_connect.return_value = MagicMock()
+        mock_validate.return_value = True
+        mock_submit.return_value = (True, "Your registration was updated successfully!")
+        mock_get_player_info.return_value = ("test@example.com", "John", "Doe")
+        mock_send_email.return_value = True
+
+        # Simulate an API Gateway GET request with query strings
+        event = {
+            "queryStringParameters": {
+                "id": "123",
+                "registration": "true"
+            }
+        }
+
+        response = process_registration.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn("registration was updated successfully", response['body'])
+        mock_submit.assert_called_once_with(mock_connect.return_value, 123, True, unittest.mock.ANY)
+        mock_send_email.assert_called_once()
+
+    @patch('email_registration.pymysql.connect')
+    @patch('email_registration.get_past_registered_players')
+    @patch('email_registration.smtp_connect')
+    @patch('email_registration.smtp_send')
+    def test_email_registration_skips_registered(self, mock_smtp_send, mock_smtp_connect, mock_get_players, mock_connect):
+        # Setup mocks for sending out the season sign-up blast
+        mock_connect.return_value = MagicMock()
+        mock_smtp = MagicMock()
+        mock_smtp_connect.return_value = mock_smtp
+        mock_smtp_send.return_value = True
+
+        # Mock players: (player_id, email, last, first, titles, rookie, registered_status)
+        # Player 2 has a status of 1 (already registered), so they should be skipped
+        mock_get_players.return_value = [
+            (1, "p1@example.com", "Doe", "John", 0, 1, None),
+            (2, "p2@example.com", "Smith", "Jane", 1, 0, 1)
+        ]
+
+        event = {"detail-type": "Scheduled Event"}
+
+        response = email_registration.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(mock_smtp_send.call_count, 1) # Ensure only player 1 receives an email
+
+
+class TestPlayerManagement(unittest.TestCase):
+
+    @patch('add_lotw_player.pymysql.connect')
+    @patch('add_lotw_player.add_lotw_player')
+    @patch.dict(os.environ, {'email': 'new@example.com', 'first_name': 'New', 'last_name': 'Player'}, clear=False)
+    def test_add_player_manual_run(self, mock_add_player, mock_connect):
+        # Ensures manual invocation uses environment variables to seed the database
+        mock_connect.return_value = MagicMock()
+        mock_add_player.return_value = (True, "Successfully added player")
+
+        event = {"detail-type": "manual_run"}
+
+        response = add_lotw_player.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        mock_add_player.assert_called_once_with(mock_connect.return_value, 'new@example.com', 'New', 'Player', False)
+
+
+class TestAnalyticsGeneration(unittest.TestCase):
+
+    @patch('email_analytics.pymysql.connect')
+    @patch('email_analytics.smtp_connect')
+    @patch('email_analytics.smtp_send')
+    @patch('email_analytics.get_all_paid_players')
+    @patch('email_analytics.get_team_ats_records')
+    @patch('email_analytics.get_all_career_standings')
+    @patch('email_analytics.get_standings')
+    @patch('email_analytics.get_player_season_details')
+    @patch('email_analytics.get_player_career_stats')
+    @patch('email_analytics.get_player_yearly_history')
+    @patch('email_analytics.cloudwatch')
+    def test_email_analytics(self, mock_cloudwatch, mock_yearly, mock_career, mock_season, mock_standings, mock_career_standings, mock_team_ats, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_connect):
+        # Mocking deep SQL analytics dependencies
+        mock_connect.return_value = MagicMock()
+        mock_smtp = MagicMock()
+        mock_smtp_connect.return_value = mock_smtp
+        mock_smtp_send.return_value = True
+
+        mock_get_players.return_value = [(1, "p1@example.com", "Doe", "John", 0, 1)]
+        mock_team_ats.return_value = [("Seahawks", 1, 0, 1.0, 1, 0, 0, 0)]
+        mock_career_standings.return_value = [(1, "Doe, John", 10, 5, 0.66)]
+        mock_standings.return_value = [(1, "Doe", "John", 0, 1, 10, 5, 0.66, 15, "W2")]
+        mock_season.return_value = ([{'week': 1, 'pick': 'SEA -3', 'game_result': 'SEA 20 v DEN 10', 'site': 'Home', 'result': 'Win', 'type': 'Favorite'}], 1, 0, 0)
+        mock_career.return_value = (10, 5, 8, 4, 3)
+        mock_yearly.return_value = [{'year': 2025, 'w': 10, 'l': 5}]
+
+        event = {"detail-type": "Scheduled Event"}
+
+        response = email_analytics.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        mock_smtp_send.assert_called_once()
+        mock_cloudwatch.put_metric_data.assert_called_once()
+
+
+class TestWeeklyDistributions(unittest.TestCase):
+
+    @patch('email_lines.pymysql.connect')
+    @patch('email_lines.smtp_connect')
+    @patch('email_lines.smtp_send')
+    @patch('email_lines.get_all_paid_players')
+    @patch('email_lines.get_auth_token')
+    @patch('email_lines.create_auth_token')
+    @patch('email_lines.get_current_pick')
+    @patch('email_lines.build_lines_email_body')
+    @patch('email_lines.cloudwatch')
+    def test_email_lines_uses_existing_token(self, mock_cloudwatch, mock_build_body, mock_get_pick, mock_create_token, mock_get_token, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_connect):
+        # Validates that a player who already opened lines doesn't trigger a new token creation
+        mock_connect.return_value = MagicMock()
+        mock_smtp = MagicMock()
+        mock_smtp_connect.return_value = mock_smtp
+        mock_smtp_send.return_value = True
+
+        mock_get_players.return_value = [(1, "p1@example.com", "Doe", "John", 0, 1)]
+        mock_get_token.return_value = "ABC12345" # Existing token found
+        mock_get_pick.return_value = (None, "NOP", None, None, False) # Pick not locked
+        mock_build_body.return_value = "Mock body"
+
+        event = {"detail-type": "Scheduled Event"}
+
+        response = email_lines.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        mock_smtp_send.assert_called_once()
+        mock_cloudwatch.put_metric_data.assert_called_once()
+        mock_create_token.assert_not_called() # Crucial assertion: no new token minted
