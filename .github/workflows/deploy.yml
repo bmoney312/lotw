@@ -47,9 +47,9 @@ jobs:
 
       - name: Install Test Dependencies
         run: |
-          python3 -m pip install --upgrade pip
+          python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi
-          pip3 install pytest
+          pip install pytest python-dateutil
 
       - name: Run Pytest
         env:
