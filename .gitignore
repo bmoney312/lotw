@@ -1,6 +1,5 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
-<<<<<<< HEAD
 *.py[cod]
 _cffi_backend.cpython-36m-x86_64-linux-gnu.so
 _cffi_backend.cpython-313-x86_64-linux-gnu.so
@@ -46,6 +45,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+package/
+*.zip
+.venv/
+venv/
+env/
+*.dist-info/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -226,4 +231,3 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
->>>>>>> origin/main
