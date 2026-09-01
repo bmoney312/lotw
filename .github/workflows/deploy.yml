@@ -1,0 +1,116 @@
+name: CI/CD Pipeline - lotw
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write   # OIDC authentication
+  contents: read
+
+env:
+  AWS_REGION: "us-west-2"
+  S3_BUCKET: "lotw-builds-062043405251-us-west-2-an"  # S3 bucket for staging zips
+  PYTHON_VERSION: "3.13"
+  # List all 15 Lambda function names separated by space
+  LAMBDA_FUNCTIONS: >-
+    add_lotw_player
+    build_lines_sql
+    build_results_sql
+    email_analytics
+    email_league
+    email_lines
+    email_picks
+    email_registration
+    email_standings
+    emit_lotw_metrics
+    process_pick
+    process_registration
+    submit_pick
+    update_payment_status
+    update_standings
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install Test Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip3 install -r requirements.txt; fi
+          pip3 install pytest
+
+      - name: Run Pytest
+        run: pytest -v tests/
+
+  build-and-deploy:
+    name: Package & Deploy All Functions
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Package Lambda .ZIP Artifact
+        run: |
+          mkdir -p package
+
+          # Pre-compile C-extensions/binary wheels for Lambda Python 3.13 AL2023
+          if [ -f requirements.txt ]; then
+            pip3 install \
+              --platform manylinux2014_x86_64 \
+              --target ./package \
+              --implementation cp \
+              --python-version 3.13 \
+              --only-binary=:all: \
+              --upgrade \
+              -r requirements.txt
+          fi
+
+          # Copy application scripts and SQL assets
+          cp *.py package/ 2>/dev/null || true
+          cp *.sql package/ 2>/dev/null || true
+
+          # Create zip artifact
+          cd package
+          zip -r ../deployment.zip . -x "*.git*" "tests/*" "*__pycache__*"
+          cd ..
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload Artifact to S3 Staging
+        run: |
+          S3_KEY="deployments/lotw-${{ github.sha }}.zip"
+          aws s3 cp deployment.zip "s3://${{ env.S3_BUCKET }}/${S3_KEY}"
+          echo "S3_KEY=${S3_KEY}" >> $GITHUB_ENV
+
+      - name: Update Code on All 15 Lambda Functions
+        run: |
+          for FUNCTION_NAME in ${{ env.LAMBDA_FUNCTIONS }}; do
+            echo "Deploying to function: $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name "$FUNCTION_NAME" \
+              --s3-bucket "${{ env.S3_BUCKET }}" \
+              --s3-key "${{ env.S3_KEY }}" \
+              --publish
+          done
