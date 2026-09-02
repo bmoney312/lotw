@@ -94,9 +94,6 @@ def lambda_handler(event, context):
         logger.info("Found {} unpaid registered players for the {} season.".format(len(players), current_year))
         logger.info("Players {}".format(players))
 
-    logger.error("Added error exit for testing")
-    sys.exit()
-
     # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
