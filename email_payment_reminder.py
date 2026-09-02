@@ -120,7 +120,7 @@ def lambda_handler(event, context):
         sys.exit()
 
     payment_info = """
-The league fee is $50. <b>The fee is due before the season starts.</b> You will begin receiving the weekly lines as soon as your payment is processed. See payment information below.<br>
+The league fee is $50. <b>The fee is due before the season starts.</b> You will begin receiving the weekly lines as soon as your payment is processed. See payment information below. Please reply to this email if you have questions or if this was sent in error.<br>
 <br>
 <b>Check:</b><br>
 Brendan Connell<br>
@@ -139,12 +139,12 @@ Lynnwood, WA 98036<br>
 
         # build message body
         message = "<body>\n<p>Hello {},<br><br>".format(first_name)
-        message += "This is a friendly reminder that you are registered for the {} Lock of the Week season, but we haven't received your entry fee yet.<br><br>".format(current_year)
+        message += "This is a friendly reminder that you are registered for the {} Lock of the Week season, but I haven't received your entry fee yet.<br><br>".format(current_year)
         message += payment_info + "<br>Thanks,<br>-BMC</p></body></html>"
 
         mail_body = build_html_head() + message
         mail_to = (player_email, 'bmoney312@gmail.com')
-        mail_subject = "lotw: friendly payment reminder for the {} season".format(current_year)
+        mail_subject = "lotw: payment reminder for the {} season".format(current_year)
 
         # --- Send email with retry logic ---
         email_sent_successfully = False
