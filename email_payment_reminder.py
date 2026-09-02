@@ -72,7 +72,10 @@ def lambda_handler(event, context):
     player_id = os.environ.get('player_id')
 
     if request_type == "test":
-        players = get_unpaid_registered_players(conn, current_year, int(1))
+        # players = get_unpaid_registered_players(conn, current_year, int(1))
+        players = [
+            (1, "bmoney312@yahoo.com", "Brendan", "Connell"),
+        ]
     elif request_type == "manual_run":
         if player_id is None:
             players = get_unpaid_registered_players(conn, current_year)
