@@ -24,6 +24,7 @@ env:
     email_picks
     email_registration
     email_standings
+    email_payment_reminder
     emit_lotw_metrics
     process_pick
     process_registration
