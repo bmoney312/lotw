@@ -86,12 +86,16 @@ def lambda_handler(event, context):
         sys.exit()
 
     logger.info("Request type is {}".format(request_type))
-    logger.info("Found {} unpaid registered players for the {} season.".format(len(players), current_year))
-    logger.info("Players {}".format(players))
 
     if not players:
         conn.close()
         return response(200, 'text/html', build_html("No unpaid registered players found. Everyone is paid up!"))
+    else:
+        logger.info("Found {} unpaid registered players for the {} season.".format(len(players), current_year))
+        logger.info("Players {}".format(players))
+
+    logger.error("Added error exit for testing")
+    sys.exit()
 
     # initialize variables
     mail_username = os.environ['mail_username']
