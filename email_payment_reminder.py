@@ -4,7 +4,7 @@ import json
 import pymysql
 import logging
 from time import sleep
-from lotw import get_current_year, get_player, build_html, build_html_head
+from lotw import get_current_year, build_html, build_html_head
 from lotw import response, smtp_connect, smtp_send
 
 # global variables
@@ -12,10 +12,11 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def get_unpaid_registered_players(conn, year):
+def get_unpaid_registered_players(conn, year, player_id=None):
     """
-    Return all rows in LOTW Players database who are registered for the
+    Return rows in LOTW Players database who are registered for the
     specified year but have not yet paid the entry fee.
+    If player_id is provided, filters for that specific player.
     """
     with conn.cursor() as cur:
         select_statement = """
@@ -24,8 +25,15 @@ def get_unpaid_registered_players(conn, year):
             WHERE `{}_registration` = 1
             AND (`{}_paid` IS NULL OR `{}_paid` = 0)
         """.format(year, year, year)
-        logger.debug("get_unpaid_registered_players(): {}".format(select_statement))
-        cur.execute(select_statement)
+
+        if player_id is not None:
+            select_statement += " AND `player_id` = %s"
+            logger.debug("get_unpaid_registered_players(): {} with player_id {}".format(select_statement, player_id))
+            cur.execute(select_statement, (player_id,))
+        else:
+            logger.debug("get_unpaid_registered_players(): {}".format(select_statement))
+            cur.execute(select_statement)
+
         result = cur.fetchall()
         return result
 
@@ -64,12 +72,12 @@ def lambda_handler(event, context):
     player_id = os.environ.get('player_id')
 
     if request_type == "test":
-        players = get_player(conn, int(1))
+        players = get_unpaid_registered_players(conn, current_year, int(1))
     elif request_type == "manual_run":
         if player_id is None:
             players = get_unpaid_registered_players(conn, current_year)
         else:
-            players = get_player(conn, int(player_id))
+            players = get_unpaid_registered_players(conn, current_year, int(player_id))
     else:
         logger.error("Invalid request type {}".format(request_type))
         sys.exit()
