@@ -20,6 +20,7 @@ def add_lotw_player(conn, email, first_name, last_name, testflag):
 
     logger.info("Adding new player: {} {}, {}".format(first_name, last_name, email))
     current_year = get_current_year()
+    player_id = None
     try:
         with conn.cursor() as cur:
             sql = "INSERT INTO `Players` (`email`, `last_name`, `first_name`, `past_titles`, `rookie`, `" + str(current_year) + "_registration`, `" + str(current_year) + "_paid`) VALUES (%s, %s, %s, 0, 1, NULL, NULL)"
@@ -28,12 +29,17 @@ def add_lotw_player(conn, email, first_name, last_name, testflag):
                 logger.info("Test flag detected, not committing change. SQL statement: {}".format(sql))
             else:
                 cur.execute(sql, (str(email), str(last_name), str(first_name),))
+                player_id = cur.lastrowid
                 conn.commit()
     except Exception as e:
         logger.error("Error updating database: {}".format(str(e)))
         raise
 
-    message = "Successfully added player {} {}, {} to Players table".format(first_name, last_name, email)
+    if testflag is True:
+        message = "Successfully added player {} {}, {} to Players table (test run - no player_id generated)".format(first_name, last_name, email)
+    else:
+        message = "Successfully added player {} {}, {} to Players table with player_id {}".format(first_name, last_name, email, player_id)
+
     logger.info(message)
     return (True, message)
 
