@@ -5,7 +5,7 @@ from lotw import validate_field, get_db_connection, get_current_year, build_html
 
 # global variables
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def add_lotw_player(conn, email, first_name, last_name, testflag):
