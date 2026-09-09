@@ -335,8 +335,9 @@ def lambda_handler(event, context):
     logger.debug("send_pick_summary is {}".format(send_pick_summary))
 
     # current time, set second and microsecond to 0 to match kickoff times
-    time_now = datetime.datetime.now().replace(second=0, microsecond=0)
-    # time_now = datetime.datetime.now().replace(minute=15, second=0, microsecond=0)
+    raw_time = datetime.datetime.now()
+    adjusted_minute = raw_time.minute - (raw_time.minute % 5)
+    time_now = raw_time.replace(minute=adjusted_minute, second=0, microsecond=0)
 
     # set pick deadline to current time
     # scheduled events should align with game times to the minute
