@@ -212,4 +212,4 @@ def lambda_handler(event, context):
     smtp_relay.close()
 
     # return result
-    return response(200, 'text/html', build_html("Commish message message_id {} sent successfully to {} players.".format(message_id,emails_sent_count)))
+    return response(200, 'text/html', build_html("Commish message message_id {} sent successfully to {} players.".format(message_id, emails_sent_count)))
