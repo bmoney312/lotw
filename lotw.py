@@ -1,15 +1,55 @@
+import os
+import json
+import boto3
+import pymysql
 import logging
 import datetime
-from dateutil import tz
 import pytz
 import smtplib
 import email.message
 import string
 import random
+from dateutil import tz
 
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Global cache outside handler execution
+_cached_db_creds = None
+_secrets_client = None
+
+
+def get_db_credentials(secret_name="lotw/db/credentials"):
+    """
+    Retrieve database credentials from Secrets Manager with in-memory caching.
+    """
+    global _cached_db_creds, _secrets_client
+    if _cached_db_creds is None:
+        if _secrets_client is None:
+            _secrets_client = boto3.client('secretsmanager')
+        logger.info("Fetching database credentials from Secrets Manager: {}".format(secret_name))
+        response = _secrets_client.get_secret_value(SecretId=secret_name)
+        _cached_db_creds = json.loads(response['SecretString'])
+    return _cached_db_creds
+
+
+def get_db_connection():
+    """
+    Establish and return a pymysql connection using cached Secrets Manager credentials.
+    """
+    secret_name = os.environ.get('db_secret_name', 'lotw/db/credentials')
+    creds = get_db_credentials(secret_name)
+
+    conn = pymysql.connect(
+        host=creds['db_endpoint'],
+        port=int(creds['db_port']),
+        user=creds['db_username'],
+        passwd=creds['db_password'],
+        db=creds['db_name'],
+        connect_timeout=5
+    )
+    return conn
 
 
 def response(status, content_type, response_body, cors=False):
