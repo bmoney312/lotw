@@ -199,13 +199,15 @@ class TestRegistrationFlow(unittest.TestCase):
         mock_submit.assert_called_once_with(mock_connect.return_value, 123, True, unittest.mock.ANY)
         mock_send_email.assert_called_once()
 
-    @patch('email_registration.pymysql.connect')
-    @patch('email_registration.get_past_registered_players')
+    @patch('email_registration.cloudwatch')
+    @patch('email_registration.get_db_connection')
     @patch('email_registration.smtp_connect')
     @patch('email_registration.smtp_send')
-    def test_email_registration_skips_registered(self, mock_smtp_send, mock_smtp_connect, mock_get_players, mock_connect):
-        # Setup mocks for sending out the season sign-up blast
-        mock_connect.return_value = MagicMock()
+    @patch('email_registration.get_past_registered_players')
+    def test_email_registration_skips_registered(self, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_db_conn, mock_cw):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
         mock_smtp = MagicMock()
         mock_smtp_connect.return_value = mock_smtp
         mock_smtp_send.return_value = True
@@ -223,7 +225,6 @@ class TestRegistrationFlow(unittest.TestCase):
 
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(mock_smtp_send.call_count, 1) # Ensure only player 1 receives an email
-
 
 class TestPlayerManagement(unittest.TestCase):
 
