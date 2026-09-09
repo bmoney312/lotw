@@ -247,7 +247,7 @@ class TestPlayerManagement(unittest.TestCase):
 
 class TestAnalyticsGeneration(unittest.TestCase):
 
-    @patch('email_analytics.pymysql.connect')
+    @patch('email_analytics.get_db_connection')
     @patch('email_analytics.smtp_connect')
     @patch('email_analytics.smtp_send')
     @patch('email_analytics.get_all_paid_players')
@@ -258,13 +258,17 @@ class TestAnalyticsGeneration(unittest.TestCase):
     @patch('email_analytics.get_player_career_stats')
     @patch('email_analytics.get_player_yearly_history')
     @patch('email_analytics.cloudwatch')
-    def test_email_analytics(self, mock_cloudwatch, mock_yearly, mock_career, mock_season, mock_standings, mock_career_standings, mock_team_ats, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_connect):
-        # Mocking deep SQL analytics dependencies
-        mock_connect.return_value = MagicMock()
+    def test_email_analytics(self, mock_cloudwatch, mock_yearly, mock_career, mock_season, mock_standings, mock_career_standings, mock_team_ats, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_db_conn):
+        # Mocking DB connection
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
+        # Mocking SMTP
         mock_smtp = MagicMock()
         mock_smtp_connect.return_value = mock_smtp
         mock_smtp_send.return_value = True
 
+        # Mocking deep SQL analytics dependencies
         mock_get_players.return_value = [(1, "p1@example.com", "Doe", "John", 0, 1)]
         mock_team_ats.return_value = [("Seahawks", 1, 0, 1.0, 1, 0, 0, 0)]
         mock_career_standings.return_value = [(1, "Doe, John", 10, 5, 0.66)]
