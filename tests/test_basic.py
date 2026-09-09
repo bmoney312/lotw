@@ -138,14 +138,14 @@ class TestDatabaseUpdates(unittest.TestCase):
 
 class TestMetricsEmission(unittest.TestCase):
 
-    @patch('emit_lotw_metrics.pymysql.connect')
+    @patch('emit_lotw_metrics.get_db_connection')
     @patch('emit_lotw_metrics.boto3.client')
     @patch('emit_lotw_metrics.get_all_current_players')
     @patch('emit_lotw_metrics.get_all_picks')
-    def test_emit_metrics(self, mock_get_picks, mock_get_players, mock_boto_client, mock_connect):
+    def test_emit_metrics(self, mock_get_picks, mock_get_players, mock_boto_client, mock_db_conn):
         # 1. Setup DB Mock
         mock_db = MagicMock()
-        mock_connect.return_value = mock_db
+        mock_db_conn.return_value = mock_db
         
         # Mock DB Cursor behavior for the reg columns logic
         mock_cursor = MagicMock()
@@ -168,6 +168,7 @@ class TestMetricsEmission(unittest.TestCase):
         # 4. Assertions
         self.assertEqual(response['statusCode'], 200)
         self.assertTrue(mock_cloudwatch.put_metric_data.called)
+
 
 class TestRegistrationFlow(unittest.TestCase):
 

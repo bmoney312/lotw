@@ -1,11 +1,10 @@
 import os
 import sys
 import json
-import pymysql
 import logging
 import datetime
 import boto3
-from lotw import get_all_current_players, get_all_picks
+from lotw import get_all_current_players, get_all_picks, get_db_connection
 from lotw import get_current_year, get_current_week, response, build_html
 
 # global variables
@@ -46,20 +45,11 @@ def lambda_handler(event, context):
         logger.info("Unable to determine request type, defaulting to 'Scheduled Event'")
         request_type = "Scheduled Event"  # Default for metrics
 
-    db_endpoint = os.environ['db_endpoint']
-    db_port = int(os.environ['db_port'])
-    db_username = os.environ['db_username']
-    db_password = os.environ['db_password']
-    db_name = os.environ['db_name']
-
-    logger.info("Connecting to MySQL database {}".format(db_endpoint))
-
+    # create lotw database connection
     try:
-        conn = pymysql.connect(host=db_endpoint, port=db_port,
-                               user=db_username, passwd=db_password,
-                               db=db_name, connect_timeout=5)  # Removed DictCursor
+        conn = get_db_connection()
     except Exception as e:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database: {}".format(str(e)))
+        logger.error("ERROR: Could not connect to MySQL database: {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
