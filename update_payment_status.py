@@ -91,6 +91,10 @@ def lambda_handler(event, context):
         logger.error("Error establishing SMTP connection with {}".format(mail_host))
         sys.exit()
 
+    if len(players) != 1:
+        logger.error("Expected 1 player and received {}.".format(len(players)))
+        sys.exit()
+
     for row in players:
         (player_id, player_email, last_name, first_name, titles, is_rookie) = row
         logger.info("Working on player {} {} {} {}".format(player_id, first_name, last_name, player_email))
