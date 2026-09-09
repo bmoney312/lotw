@@ -669,5 +669,5 @@ def lambda_handler(event, context):
 
     smtp_relay.close()
     conn.close()
-    logger.info("Analytics reports sent successfully.")
-    return response(200, 'text/html', "Analytics reports sent successfully.")
+    logger.info("Analytics reports sent successfully to {} players.".format(emails_sent_count))
+    return response(200, 'text/html', "Analytics reports sent successfully to {} players.".format(emails_sent_count))

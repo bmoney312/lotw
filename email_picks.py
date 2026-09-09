@@ -491,5 +491,5 @@ def lambda_handler(event, context):
     smtp_relay.close()
 
     # return result
-    logger.info("Picks for week {} sent successfully. Exiting. [200]".format(week))
-    return response(200, 'text/html', build_html("Picks for week {} sent successfully.".format(week)))
+    logger.info("Picks for week {} sent successfully to {} players.".format(week, emails_sent_count))
+    return response(200, 'text/html', build_html("Picks for week {} sent successfully to {} players.".format(week, emails_sent_count)))
