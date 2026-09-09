@@ -4,13 +4,41 @@ import json
 import pymysql
 import logging
 import datetime
+import boto3
 from time import sleep
-from lotw import get_commish_message, get_player, get_all_paid_players
+from lotw import get_commish_message, get_player, get_all_paid_players, get_current_year
 from lotw import build_html, response, build_html_head, smtp_connect, smtp_send
 
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+cloudwatch = boto3.client('cloudwatch')
+
+
+def emit_emails_sent_metric(message_id, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'LeagueEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())},
+                        {'Name': 'MessageId', 'Value': str(message_id)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted LeagueEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
 
 
 def lambda_handler(event, context):
@@ -105,6 +133,9 @@ def lambda_handler(event, context):
         logger.error("Unexpected missing value for e-mail subject")
         sys.exit()
 
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
     if smtp_relay is None:
@@ -131,6 +162,7 @@ def lambda_handler(event, context):
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
@@ -159,14 +191,19 @@ def lambda_handler(event, context):
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
+            # emit emails sent metric
+            emit_emails_sent_metric(message_id, emails_sent_count)
+
             # close database connection
             conn.close()
 
             raise RuntimeError("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES))
-            # return response(504, 'text/html', build_html("Commish message send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
+
+    # emit emails sent metric
+    emit_emails_sent_metric(message_id, emails_sent_count)
 
     # close database connection
     conn.close()
@@ -175,4 +212,4 @@ def lambda_handler(event, context):
     smtp_relay.close()
 
     # return result
-    return response(200, 'text/html', build_html("Commish message message_id {} sent successfully.".format(message_id)))
+    return response(200, 'text/html', build_html("Commish message message_id {} sent successfully to {} players.".format(message_id,emails_sent_count)))
