@@ -171,14 +171,15 @@ class TestMetricsEmission(unittest.TestCase):
 
 class TestRegistrationFlow(unittest.TestCase):
 
-    @patch('process_registration.pymysql.connect')
+    @patch('process_registration.get_db_connection')
     @patch('process_registration.validate_field')
     @patch('process_registration.submit_registration')
     @patch('process_registration.get_player_info')
     @patch('process_registration.send_email')
-    def test_process_registration_success(self, mock_send_email, mock_get_player_info, mock_submit, mock_validate, mock_connect):
+    def test_process_registration_success(self, mock_send_email, mock_get_player_info, mock_submit, mock_validate, mock_db_conn):
         # Setup mocks for receiving a player's opt-in choice
-        mock_connect.return_value = MagicMock()
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
         mock_validate.return_value = True
         mock_submit.return_value = (True, "Your registration was updated successfully!")
         mock_get_player_info.return_value = ("test@example.com", "John", "Doe")
@@ -196,7 +197,7 @@ class TestRegistrationFlow(unittest.TestCase):
 
         self.assertEqual(response['statusCode'], 200)
         self.assertIn("registration was updated successfully", response['body'])
-        mock_submit.assert_called_once_with(mock_connect.return_value, 123, True, unittest.mock.ANY)
+        mock_submit.assert_called_once_with(mock_conn, 123, True, unittest.mock.ANY)
         mock_send_email.assert_called_once()
 
     @patch('email_registration.cloudwatch')
