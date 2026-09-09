@@ -6,9 +6,10 @@ from lotw import get_db_connection, response, build_html_response
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
 def lambda_handler(event, context):
     logger.info("Received event: " + json.dumps(event, indent=2))
-    
+
     try:
         conn = get_db_connection()
     except Exception as e:
@@ -20,7 +21,7 @@ def lambda_handler(event, context):
 
     if not league_id:
         return response(400, 'text/html', build_html_response("Missing league_id parameter"))
-        
+
     if int(league_id) == 1:
         return response(403, 'text/html', build_html_response("Cannot delete the Main Event league."))
 

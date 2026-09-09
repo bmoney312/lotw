@@ -6,9 +6,10 @@ from lotw import get_db_connection, validate_field, response, build_html_respons
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
 def lambda_handler(event, context):
     logger.info("Received event: " + json.dumps(event, indent=2))
-    
+
     try:
         conn = get_db_connection()
     except Exception as e:
@@ -39,7 +40,7 @@ def lambda_handler(event, context):
         conn.close()
         # Handle duplicate entry error gracefully
         if 'Duplicate entry' in str(e):
-             return response(200, 'text/html', build_html_response("Player is already in this league."))
+            return response(200, 'text/html', build_html_response("Player is already in this league."))
         return response(500, 'text/html', build_html_response("Error adding player: {}".format(str(e))))
 
     conn.close()

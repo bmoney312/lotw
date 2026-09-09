@@ -6,9 +6,10 @@ from lotw import get_db_connection, response, build_html_response
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
 def lambda_handler(event, context):
     logger.info("Received event: " + json.dumps(event, indent=2))
-    
+
     try:
         conn = get_db_connection()
     except Exception as e:
