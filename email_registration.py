@@ -298,4 +298,4 @@ Would you like to participate in LOTW this season?  Please click the link below 
     smtp_relay.close()
 
     # return result
-    return response(200, 'text/html', build_html("registration emails sent successfully."))
+    return response(200, 'text/html', build_html("Sent {} registration emails successfully.".format(emails_sent_count)))
