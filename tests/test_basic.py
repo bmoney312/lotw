@@ -227,20 +227,20 @@ class TestRegistrationFlow(unittest.TestCase):
 
 class TestPlayerManagement(unittest.TestCase):
 
-    @patch('add_lotw_player.pymysql.connect')
+    @patch('add_lotw_player.get_db_connection')
     @patch('add_lotw_player.add_lotw_player')
     @patch.dict(os.environ, {'email': 'new@example.com', 'first_name': 'New', 'last_name': 'Player'}, clear=False)
-    def test_add_player_manual_run(self, mock_add_player, mock_connect):
-        # Ensures manual invocation uses environment variables to seed the database
-        mock_connect.return_value = MagicMock()
+    def test_add_player_manual_run(self, mock_add_player, mock_db_conn):
+        # Return a mock connection object with a close() method
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
         mock_add_player.return_value = (True, "Successfully added player")
 
         event = {"detail-type": "manual_run"}
-
         response = add_lotw_player.lambda_handler(event, {})
 
         self.assertEqual(response['statusCode'], 200)
-        mock_add_player.assert_called_once_with(mock_connect.return_value, 'new@example.com', 'New', 'Player', False)
+        mock_add_player.assert_called_once_with(mock_conn, 'new@example.com', 'New', 'Player', False)
 
 
 class TestAnalyticsGeneration(unittest.TestCase):

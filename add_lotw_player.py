@@ -1,8 +1,7 @@
 import os
 import sys
-import pymysql
 import logging
-from lotw import validate_field, get_current_year, build_html, response
+from lotw import validate_field, get_db_connection, get_current_year, build_html, response
 
 # global variables
 logger = logging.getLogger()
@@ -49,20 +48,11 @@ def lambda_handler(event, context):
         logger.error("Unable to determine request type")
         sys.exit()
 
-    db_endpoint = os.environ['db_endpoint']
-    db_port = int(os.environ['db_port'])
-    db_username = os.environ['db_username']
-    db_password = os.environ['db_password']
-    db_name = os.environ['db_name']
-
-    logger.info("Connecting to MySQL database {}".format(db_endpoint))
-
+    # create lotw database connection
     try:
-        conn = pymysql.connect(host=db_endpoint, port=db_port,
-                               user=db_username, passwd=db_password,
-                               db=db_name, connect_timeout=5)
+        conn = get_db_connection()
     except Exception as e:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
+        logger.error("ERROR: Could not connect to MySQL database: {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
