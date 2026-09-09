@@ -3,6 +3,7 @@ import sys
 import json
 import pymysql
 import logging
+import boto3
 from time import sleep
 from lotw import get_player_reg, get_current_year, get_past_registered_players
 from lotw import build_html, response, smtp_connect, smtp_send
@@ -10,6 +11,7 @@ from lotw import build_html, response, smtp_connect, smtp_send
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+cloudwatch = boto3.client('cloudwatch')
 
 
 def get_button_html(player_id):
@@ -79,6 +81,31 @@ def build_email_head():
 </head>
 """
     return html
+
+
+def emit_emails_sent_metric(emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'RegistrationEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(get_current_year())}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted RegistrationEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
 
 
 def lambda_handler(event, context):
@@ -159,6 +186,9 @@ def lambda_handler(event, context):
     logger.info("Request type is {}".format(request_type))
     logger.debug("Players {}".format(players))
 
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
     if smtp_relay is None:
@@ -216,6 +246,7 @@ Would you like to participate in LOTW this season?  Please click the link below 
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break  # Exit retry loop on success
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
@@ -244,6 +275,9 @@ Would you like to participate in LOTW this season?  Please click the link below 
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
+            # emit emails sent metric
+            emit_emails_sent_metric(emails_sent_count)
+
             # close database connection
             conn.close()
 
@@ -253,6 +287,9 @@ Would you like to participate in LOTW this season?  Please click the link below 
 
         # Gentle pacing
         sleep(2)
+
+    # emit emails sent metric
+    emit_emails_sent_metric(emails_sent_count)
 
     # close database connection
     conn.close()
