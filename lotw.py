@@ -1,7 +1,3 @@
-# import os
-# import sys
-# import json
-# import pymysql
 import logging
 import datetime
 from dateutil import tz
