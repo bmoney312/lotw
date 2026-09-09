@@ -3,6 +3,7 @@ import sys
 import json
 import pymysql
 import logging
+import boto3
 from time import sleep
 from lotw import get_current_year, build_html, build_html_head
 from lotw import response, smtp_connect, smtp_send
@@ -10,6 +11,32 @@ from lotw import response, smtp_connect, smtp_send
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+cloudwatch = boto3.client('cloudwatch')
+
+
+def emit_emails_sent_metric(year, emails_sent_count):
+    # Emit the metric emails_sent_count
+    retval = False
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='lotw',
+            MetricData=[
+                {
+                    'MetricName': 'PaymentReminderEmailsSent',
+                    'Dimensions': [
+                        {'Name': 'Year', 'Value': str(year)}
+                    ],
+                    'Value': emails_sent_count,
+                    'Unit': 'Count'
+                },
+            ]
+        )
+        logger.info("Emitted PaymentReminderEmailsSent metric: {}".format(emails_sent_count))
+        retval = True
+    except Exception as e:
+        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+
+    return retval
 
 
 def get_unpaid_registered_players(conn, year, player_id=None):
@@ -87,8 +114,12 @@ def lambda_handler(event, context):
 
     logger.info("Request type is {}".format(request_type))
 
+    # initialize emails sent metric counter
+    emails_sent_count = 0
+
     if not players:
         conn.close()
+        emit_emails_sent_metric(current_year, emails_sent_count)
         return response(200, 'text/html', build_html("No unpaid registered players found. Everyone is paid up!"))
     else:
         logger.info("Found {} unpaid registered players for the {} season.".format(len(players), current_year))
@@ -155,6 +186,7 @@ Lynnwood, WA 98036<br>
             if email_result is True:
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
+                emails_sent_count += 1
                 break
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
@@ -182,12 +214,18 @@ Lynnwood, WA 98036<br>
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
+            # emit emails sent metric
+            emit_emails_sent_metric(current_year, emails_sent_count)
+
             conn.close()
             raise RuntimeError("Payment reminder send failed for player {} {} after {} attempts. Aborting.".format(player_id, player_email, MAX_RETRIES))
 
         sleep(2)
 
+    # emit emails sent metric
+    emit_emails_sent_metric(current_year, emails_sent_count)
+
     conn.close()
     smtp_relay.close()
 
-    return response(200, 'text/html', build_html("Payment reminder emails sent successfully."))
+    return response(200, 'text/html', build_html("Payment reminder emails sent successfully to {} players.".format(emails_sent_count)))
