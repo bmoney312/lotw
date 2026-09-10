@@ -133,6 +133,9 @@ def lambda_handler(event, context):
         # Total registered players for the current year
         put_cloudwatch_metric(cloudwatch, cw_namespace, 'CurrentPlayers', num_current_players, year_dim)
 
+        # Current week number published in the Year dimension
+        put_cloudwatch_metric(cloudwatch, cw_namespace, 'CurrentWeek', current_week, year_dim)
+
         # Picks metrics for the current week
         put_cloudwatch_metric(cloudwatch, cw_namespace, 'PicksMade', num_weekly_picks, week_dims)
         put_cloudwatch_metric(cloudwatch, cw_namespace, 'PlayersWithoutPick', num_no_picks, week_dims)
