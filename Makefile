@@ -9,7 +9,7 @@ install:
 
 lint:
 	flake8 *.py -v --extend-ignore=E501,C901 --exclude=six.py --count --select=E9,F63,F7,F82 --show-source --statistics
-	flake8 *.py -v --extend-ignore=E501,C901 --exclude=six.py --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+	flake8 *.py -v --extend-ignore=E501,C901 --exclude=six.py --count --max-complexity=10 --max-line-length=127 --statistics
 
 test:
 	python3 -m pytest tests/test_basic.py -v
