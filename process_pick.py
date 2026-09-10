@@ -118,6 +118,7 @@ def lambda_handler(event, context):
 
     # validate input
     if not validate_key(event, 'body'):
+        logger.error("HTTP/400 Bad Request [body]")
         return response(400, 'text/html', build_html_response("Bad Request [body]"))
 
     # read body of request
@@ -128,26 +129,29 @@ def lambda_handler(event, context):
         (key, value) = t.split('=')
         params[key] = value
 
-    logger.debug("params: {}".format(params))
+    logger.debug("validating params: {}".format(params))
 
     # Check for human interaction token
     user_action = params.get('user_action')
     if user_action != 'human_click':
-        logger.warning("Rejecting automated/bot submission without valid user_action token: {}".format(user_action))
+        logger.error("HTTP/400 Rejecting automated/bot submission without valid user_action token: {}".format(user_action))
         return response(400, 'text/html', build_html_response("Invalid submission. Please click the button to submit."))
 
     # check input parameters
     if not validate_key(params, 'pick'):
+        logger.error("HTTP/400 Bad Request [pick]")
         return response(400, 'text/html', build_html_response("Bad Request [pick]"))
     else:
         pick = params['pick']
 
     if not validate_key(params, 'week'):
+        logger.error("HTTP/400 Bad Request [week]")
         return response(400, 'text/html', build_html_response("Bad Request [week]"))
     else:
         week = params['week']
 
     if not validate_key(params, 'player_id'):
+        logger.error("HTTP/400 Bad Request [player_id]")
         return response(400, 'text/html', build_html_response("Bad Request [player_id]"))
     else:
         player_id = params['player_id']
@@ -156,12 +160,15 @@ def lambda_handler(event, context):
 
     # validate pick is valid team
     if not validate_field(conn, pick, "team_id", "Teams"):
+        logger.error("HTTP/400 Bad Request: pick {}".format(pick))
         return response(400, 'text/html', build_html_response("invalid team {}".format(pick)))
 
     if not validate_field(conn, player_id, 'player_id', 'Players'):
+        logger.error("HTTP/400 Bad Request: player_id {}".format(player_id))
         return response(400, 'text/html', build_html_response("invalid player {}".format(player_id)))
 
     if not validate_field(conn, week, 'week', "Games_" + str(get_current_year())):
+        logger.error("HTTP/400 Bad Request: week {}".format(week))
         return response(400, 'text/html', build_html_response("invalid week {}".format(week)))
 
     logger.debug("calling submit_pick()")
