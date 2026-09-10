@@ -69,6 +69,22 @@ class TestAPIProcessing(unittest.TestCase):
         self.assertEqual(response['statusCode'], 400)
         self.assertIn("Bad Request [body]", response['body'])
 
+    @patch('process_pick.pymysql.connect')
+    @patch('process_pick.validate_field')
+    def test_process_pick_rejects_missing_user_action(self, mock_validate, mock_connect):
+        mock_connect.return_value = MagicMock()
+        mock_validate.return_value = True
+
+        # Payload without 'user_action=human_click'
+        event = {
+            "body": "pick=SEA&week=1&player_id=123"
+        }
+
+        response = process_pick.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 400)
+        self.assertIn("Invalid submission", response['body'])
+
 
 class TestEmailGeneration(unittest.TestCase):
 
