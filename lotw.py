@@ -1258,3 +1258,42 @@ def get_player_season_details(conn, player_id, year):
         })
 
     return weekly_data, fav_count, dog_count, pickem_count
+
+
+def is_automated_scanner(headers):
+    """
+    Checks request headers for link prefetch indicators and known mail scanner user-agents.
+    """
+    if not headers or not isinstance(headers, dict):
+        return False
+
+    # Normalize headers to lowercase keys
+    norm_headers = {k.lower(): str(v).lower() for k, v in headers.items()}
+
+    # Check for explicit prefetch / preview headers
+    if norm_headers.get('purpose') == 'prefetch' or norm_headers.get('x-purpose') == 'preview':
+        return True
+    if norm_headers.get('x-moz') == 'prefetch':
+        return True
+
+    # Check User-Agent for known corporate security/crawler signatures
+    user_agent = norm_headers.get('user-agent', '')
+    scanner_signatures = [
+        'safelinks',
+        'proofpoint',
+        'barracuda',
+        'mimecast',
+        'bingpreview',
+        'google-read-aloud',
+        'facebookexternalhit',
+        'slackbot',
+        'twitterbot',
+        'linkedinbot',
+        'applebot'
+    ]
+
+    for signature in scanner_signatures:
+        if signature in user_agent:
+            return True
+
+    return False

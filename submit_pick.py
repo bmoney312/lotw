@@ -8,6 +8,7 @@ from lotw import validate_field, check_auth_token
 from lotw import get_kickoff_time, get_current_pick
 from lotw import get_player_info, get_line, datetime_to_string, get_current_year
 from lotw import build_html, build_html_head, formatted_line, response
+from lotw import is_automated_scanner
 
 # global variables
 logger = logging.getLogger()
@@ -45,6 +46,12 @@ def lambda_handler(event, context):
     """
 
     logger.info("Received event: " + json.dumps(event, indent=2))
+
+    # check for prefetch scanners
+    headers = event.get('headers', {})
+    if is_automated_scanner(headers):
+        logger.info("Prefetch / scanner bot detected from User-Agent: {}. Suppressing response.".format(headers.get('User-Agent', '')))
+        return response(200, 'text/plain', "Prefetch detected and ignored")
 
     db_endpoint = os.environ['db_endpoint']
     db_port = int(os.environ['db_port'])
