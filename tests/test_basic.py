@@ -24,6 +24,7 @@ os.environ.update({
 # Import your Lambda modules
 import process_pick
 import email_picks
+import email_standings
 import update_standings
 import emit_lotw_metrics
 import email_registration
@@ -123,6 +124,62 @@ class TestEmailGeneration(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(mock_smtp_send.call_count, 2) # Emailed 2 players
         mock_cloudwatch.put_metric_data.assert_called_once() # Assert the method was called on the object
+
+    @patch('email_standings.cloudwatch')
+    @patch('email_standings.get_db_connection')
+    @patch('email_standings.smtp_connect')
+    @patch('email_standings.smtp_send')
+    @patch('email_standings.get_all_paid_players')
+    @patch('email_standings.get_standings')
+    @patch('email_standings.get_current_pick')
+    @patch('email_standings.get_standings_message')
+    @patch('email_standings.get_player_season_details')
+    def test_email_standings_scheduled_event(
+        self,
+        mock_season_details,
+        mock_standings_msg,
+        mock_current_pick,
+        mock_get_standings,
+        mock_get_players,
+        mock_smtp_send,
+        mock_smtp_connect,
+        mock_db_conn,
+        mock_cloudwatch
+    ):
+        # 1. Setup DB and SMTP mocks
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
+        mock_smtp = MagicMock()
+        mock_smtp_connect.return_value = mock_smtp
+        mock_smtp_send.return_value = True
+
+        # 2. Setup mock data
+        # Players: (player_id, email, last, first, titles, rookie)
+        mock_get_players.return_value = [
+            (1, "p1@example.com", "Doe", "John", 0, 1),
+            (2, "p2@example.com", "Smith", "Jane", 1, 0)
+        ]
+
+        # Standings: (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak)
+        mock_get_standings.return_value = [
+            (1, "Doe", "John", 0, 1, 2, 0, 1.000, 10, "W2"),
+            (2, "Smith", "Jane", 1, 0, 1, 1, 0.500, -2, "L1")
+        ]
+
+        # Current pick: (pick_id, pick, line, pick_ats, locked_in)
+        mock_current_pick.return_value = (101, "SEA", -3, 7, True)
+        mock_standings_msg.return_value = "Great week everyone!"
+        mock_season_details.return_value = ([], 1, 0, 0)
+
+        # 3. Invoke handler
+        event = {"detail-type": "Scheduled Event"}
+        response = email_standings.lambda_handler(event, {})
+
+        # 4. Assertions
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(mock_smtp_send.call_count, 2)
+        mock_cloudwatch.put_metric_data.assert_called_once()
 
 
 class TestDatabaseUpdates(unittest.TestCase):
