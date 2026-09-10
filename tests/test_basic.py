@@ -363,7 +363,7 @@ class TestAnalyticsGeneration(unittest.TestCase):
 
 class TestWeeklyDistributions(unittest.TestCase):
 
-    @patch('email_lines.pymysql.connect')
+    @patch('email_lines.get_db_connection')
     @patch('email_lines.smtp_connect')
     @patch('email_lines.smtp_send')
     @patch('email_lines.get_all_paid_players')
@@ -372,9 +372,11 @@ class TestWeeklyDistributions(unittest.TestCase):
     @patch('email_lines.get_current_pick')
     @patch('email_lines.build_lines_email_body')
     @patch('email_lines.cloudwatch')
-    def test_email_lines_uses_existing_token(self, mock_cloudwatch, mock_build_body, mock_get_pick, mock_create_token, mock_get_token, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_connect):
+    def test_email_lines_uses_existing_token(self, mock_cloudwatch, mock_build_body, mock_get_pick, mock_create_token, mock_get_token, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_db_conn):
         # Validates that a player who already opened lines doesn't trigger a new token creation
-        mock_connect.return_value = MagicMock()
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
         mock_smtp = MagicMock()
         mock_smtp_connect.return_value = mock_smtp
         mock_smtp_send.return_value = True
