@@ -111,7 +111,7 @@ def build_picks_email_head():
     return html
 
 
-def build_picks_email_body(week, standings, current_picks, message, send_pick_summary, current_player_id, conn):
+def build_picks_email_body(week, standings, current_picks, message, send_pick_summary, current_player_id, all_games_started):
     """
     Given database connection and current week, return body of
     LOTW line email without the html/body tags
@@ -120,8 +120,8 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
 
     current_picks is dict of format player_id => teams
 
-    Updated to include 'conn' to check game schedules explicitly for hidden vs
-    NO PICK logic
+    all_games_started is boolean, True if all games in current week have started
+    used for NO PICK logic
     """
     html = "<body>\n<p>{}</p><br>".format(message)
 
@@ -149,9 +149,6 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
     <th>Week {} Pick</th>
 </tr>
 """.format(week)
-
-    # Determine if the full slate has started
-    all_games_started = is_week_fully_started(conn, week)
 
     rank = 1
     for row in standings:
@@ -387,6 +384,9 @@ def lambda_handler(event, context):
     player_picks = get_picks_at_kickoff_time(conn, week, pick_deadline, send_pick_summary)
     logger.debug("player_picks: {}".format(player_picks))
 
+    # Determine if the full slate has started
+    all_games_started = is_week_fully_started(conn, week)
+
     # initialize emails sent metric counter
     emails_sent_count = 0
 
@@ -417,7 +417,7 @@ def lambda_handler(event, context):
                 continue
 
         # build email body for this player
-        picks_email_body = build_picks_email_body(week, standings, player_picks, commish_message, send_pick_summary, player_id, conn)
+        picks_email_body = build_picks_email_body(week, standings, player_picks, commish_message, send_pick_summary, player_id, all_games_started)
         mail_body = build_picks_email_head() + picks_email_body
 
         mail_to = (player_email, 'bmoney312@lock-of-the-week.com')
