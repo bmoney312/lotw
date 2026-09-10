@@ -127,13 +127,14 @@ class TestEmailGeneration(unittest.TestCase):
 
 class TestDatabaseUpdates(unittest.TestCase):
 
-    @patch('update_standings.pymysql.connect')
+    @patch('update_standings.get_db_connection')
     @patch('update_standings.update_game_ats')
     @patch('update_standings.update_pick_ats')
     @patch('update_standings.update_standings_table')
-    def test_update_standings_manual_run(self, mock_update_table, mock_update_pick_ats, mock_update_game_ats, mock_connect):
+    def test_update_standings_manual_run(self, mock_update_table, mock_update_pick_ats, mock_update_game_ats, mock_db_conn):
         # 1. Setup Mocks
-        mock_connect.return_value = MagicMock()
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
         mock_update_game_ats.return_value = (True, "Success")
         mock_update_pick_ats.return_value = (True, "Success")
         
