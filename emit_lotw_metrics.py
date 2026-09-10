@@ -137,6 +137,25 @@ def lambda_handler(event, context):
         put_cloudwatch_metric(cloudwatch, cw_namespace, 'PicksMade', num_weekly_picks, week_dims)
         put_cloudwatch_metric(cloudwatch, cw_namespace, 'PlayersWithoutPick', num_no_picks, week_dims)
 
+        # --- Metric 3b: Players with Multiple Active Picks (Anomaly Detection) ---
+        picks_table = "Picks_" + str(current_year)
+        with conn.cursor() as cur:
+            sql_duplicate_picks = """
+                SELECT COUNT(*) FROM (
+                    SELECT player_id
+                    FROM {}
+                    WHERE week = %s AND lock_in_time IS NOT NULL
+                    GROUP BY player_id
+                    HAVING COUNT(*) > 1
+                ) AS duplicates
+            """.format(picks_table)
+            cur.execute(sql_duplicate_picks, (current_week,))
+            duplicate_active_picks_count = cur.fetchone()[0]
+
+        put_cloudwatch_metric(
+            cloudwatch, cw_namespace, 'DuplicateActivePicks', duplicate_active_picks_count, week_dims
+        )
+
     except Exception as e:
         logger.error("Failed to get weekly pick metrics: {}".format(str(e)))
 
