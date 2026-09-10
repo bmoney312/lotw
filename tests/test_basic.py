@@ -46,12 +46,12 @@ class TestAPIProcessing(unittest.TestCase):
         mock_submit_pick.return_value = (True, "SEA", -3, "Your pick was updated successfully!")
         mock_get_player_info.return_value = ("test@example.com", "John", "Doe")
         mock_send_email.return_value = True
-        
+
         # 2. Define API Gateway Payload
         event = {
-            "body": "pick=SEA&week=1&player_id=123"
+            "body": "pick=SEA&week=1&player_id=123&user_action=human_click"
         }
-        
+
         # 3. Execute Handler
         response = process_pick.lambda_handler(event, {})
         

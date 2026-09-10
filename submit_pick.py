@@ -17,22 +17,35 @@ logger.setLevel(logging.INFO)
 
 def get_button_html(week, player_id, pick):
     """
-    print <button> and <form> html for submit and cancel buttons
+    Generate submit and cancel buttons requiring explicit user click
+    to assemble and submit the form.
     """
     html = """
- <form method="post" action="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/picks" class="inline">
+ <form id="pickForm" method="post" action="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/picks" class="inline">
    <input type="hidden" name="week" value="{}">
    <input type="hidden" name="player_id" value="{}">
-   <button type="submit" name="pick" value="{}" class="btn btn-primary">
- SUBMIT PICK
+   <input type="hidden" name="pick" value="{}">
+   <input type="hidden" id="user_action" name="user_action" value="">
+   <button type="button" id="submitBtn" class="btn btn-primary" onclick="confirmAndSubmit()">
+     SUBMIT PICK
    </button>
  </form>
  &nbsp;
-  <form action="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit" class="inline">
+ <form action="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit" class="inline">
    <button type="submit" name="pick" value="XXX" class="btn btn-default">
- CANCEL
+     CANCEL
    </button>
  </form>
+
+ <script>
+   function confirmAndSubmit() {{
+     // Populate verification field indicating a human clicked the button
+     document.getElementById('user_action').value = 'human_click';
+     document.getElementById('submitBtn').disabled = true;
+     document.getElementById('submitBtn').innerText = 'Submitting...';
+     document.getElementById('pickForm').submit();
+   }}
+ </script>
 """.format(week, player_id, pick)
 
     return html

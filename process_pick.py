@@ -130,6 +130,12 @@ def lambda_handler(event, context):
 
     logger.debug("params: {}".format(params))
 
+    # Check for human interaction token
+    user_action = params.get('user_action')
+    if user_action != 'human_click':
+        logger.warning("Rejecting automated/bot submission without valid user_action token: {}".format(user_action))
+        return response(400, 'text/html', build_html_response("Invalid submission. Please click the button to submit."))
+
     # check input parameters
     if not validate_key(params, 'pick'):
         return response(400, 'text/html', build_html_response("Bad Request [pick]"))
