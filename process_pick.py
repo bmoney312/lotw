@@ -63,13 +63,14 @@ def submit_pick(conn, player_id, pick, week):
     # update table with new pick
     try:
         with conn.cursor() as cur:
+            # Invalidate all existing active picks for this player and week to avoid race conditions
+            sql_invalidate = "UPDATE `Picks_" + str(get_current_year()) + "` SET `lock_in_time` = NULL WHERE `player_id` = %s AND `week` = %s AND `lock_in_time` IS NOT NULL"
+            logger.debug("submit_pick(): {}".format(sql_invalidate))
+            cur.execute(sql_invalidate, (player_id, week))
+
             sql = "INSERT INTO `Picks_" + str(get_current_year()) + "` (`player_id`, `week`, `pick`, `submit_time`, `lock_in_time`) VALUES (%s, %s, %s, %s, %s)"
             logger.debug("submit_pick(): {}".format(sql))
             cur.execute(sql, (player_id, week, pick, time_now, kickoff_time))
-            # set lock_in_time current pick to NULL which invalidates pick
-            sql = "UPDATE `Picks_" + str(get_current_year()) + "` SET `lock_in_time` = NULL WHERE `pick_id` = %s"
-            logger.debug("submit_pick(): {}".format(sql))
-            cur.execute(sql, (current_pick_id, ))
             conn.commit()
     except Exception as e:
         message = "Error updating database: {}".format(str(e))
