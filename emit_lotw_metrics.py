@@ -152,8 +152,14 @@ def lambda_handler(event, context):
             cur.execute(sql_duplicate_picks, (current_week,))
             duplicate_active_picks_count = cur.fetchone()[0]
 
+        # 1. Detailed emission (keeps your historical drill-downs)
         put_cloudwatch_metric(
             cloudwatch, cw_namespace, 'DuplicateActivePicks', duplicate_active_picks_count, week_dims
+        )
+
+        # 2. Dimensionless emission (target for your perpetual alarm)
+        put_cloudwatch_metric(
+            cloudwatch, cw_namespace, 'DuplicateActivePicks', duplicate_active_picks_count, []
         )
 
     except Exception as e:
