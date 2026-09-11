@@ -33,54 +33,57 @@ import add_lotw_player
 import email_analytics
 import email_lines
 
+
 class TestAPIProcessing(unittest.TestCase):
-    
-    @patch('process_pick.pymysql.connect')
+
+    @patch('process_pick.get_db_connection')
     @patch('process_pick.validate_field')
     @patch('process_pick.submit_pick')
     @patch('process_pick.send_email')
     @patch('process_pick.get_player_info')
-    def test_process_pick_success(self, mock_get_player_info, mock_send_email, mock_submit_pick, mock_validate, mock_connect):
+    def test_process_pick_success(self, mock_get_player_info, mock_send_email, mock_submit_pick, mock_validate, mock_db_conn):
         # 1. Setup Mocks
-        mock_connect.return_value = MagicMock()
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
         mock_validate.return_value = True
         mock_submit_pick.return_value = (True, "SEA", -3, "Your pick was updated successfully!")
         mock_get_player_info.return_value = ("test@example.com", "John", "Doe")
         mock_send_email.return_value = True
 
-        # 2. Define API Gateway Payload
+        # 2. Define API Gateway Payload with valid human_click token
         event = {
             "body": "pick=SEA&week=1&player_id=123&user_action=human_click"
         }
 
         # 3. Execute Handler
         response = process_pick.lambda_handler(event, {})
-        
+
         # 4. Assertions
         self.assertEqual(response['statusCode'], 200)
         self.assertIn("Your pick was updated successfully!", response['body'])
         mock_submit_pick.assert_called_once()
         mock_send_email.assert_called_once()
 
-    @patch('process_pick.pymysql.connect')
-    def test_process_pick_missing_body(self, mock_connect):
+    @patch('process_pick.get_db_connection')
+    def test_process_pick_missing_body(self, mock_db_conn):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
         event = {} # Missing body
         response = process_pick.lambda_handler(event, {})
-        
+
         self.assertEqual(response['statusCode'], 400)
         self.assertIn("Bad Request [body]", response['body'])
 
-    @patch('process_pick.pymysql.connect')
-    @patch('process_pick.validate_field')
-    def test_process_pick_rejects_missing_user_action(self, mock_validate, mock_connect):
-        mock_connect.return_value = MagicMock()
-        mock_validate.return_value = True
+    @patch('process_pick.get_db_connection')
+    def test_process_pick_rejects_missing_user_action(self, mock_db_conn):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
 
-        # Payload without 'user_action=human_click'
+        # Missing user_action token
         event = {
             "body": "pick=SEA&week=1&player_id=123"
         }
-
         response = process_pick.lambda_handler(event, {})
 
         self.assertEqual(response['statusCode'], 400)
