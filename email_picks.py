@@ -205,20 +205,37 @@ def get_picks_at_kickoff_time(conn, week, lock_in_time, send_pick_summary):
 
     return None if no picks match
     """
+    year = get_current_year()
+    picks_table = "Picks_{}".format(year)
+    games_table = "Games_{}".format(year)
+
+    select_statement = """
+        SELECT p.player_id, p.pick,
+               CASE 
+                   WHEN p.pick = g.home_team_id THEN g.home_team_line 
+                   WHEN p.pick = g.away_team_id THEN -g.home_team_line 
+                   ELSE NULL 
+               END AS line
+        FROM {} p
+        LEFT JOIN {} g 
+               ON g.week = %s AND (p.pick = g.home_team_id OR p.pick = g.away_team_id)
+        WHERE p.week = %s
+    """.format(picks_table, games_table)
+
+    if send_pick_summary is True:
+        select_statement += " AND p.lock_in_time IS NOT NULL AND p.lock_in_time < CURRENT_TIMESTAMP"
+        params = (week, week)
+    else:
+        select_statement += " AND p.lock_in_time = %s"
+        params = (week, week, lock_in_time)
+
     with conn.cursor() as cur:
-        if send_pick_summary is True:
-            select_statement = "SELECT `player_id`, `pick` FROM Picks_" + str(get_current_year()) + " WHERE `week` = %s AND `lock_in_time` IS NOT NULL AND `lock_in_time` < CURRENT_TIMESTAMP"
-            cur.execute(select_statement, (week, ))
-        else:
-            select_statement = "SELECT `player_id`, `pick` FROM Picks_" + str(get_current_year()) + " WHERE `week` = %s AND `lock_in_time` = %s"
-            cur.execute(select_statement, (week, lock_in_time))
         logger.debug("get_picks_at_kickoff_time(): SQL {}".format(select_statement))
+        cur.execute(select_statement, params)
         rows = cur.fetchall()
         picks = {}
         for row in rows:
-            (player_id, pick) = row
-            if pick is not None:
-                line = get_line(conn, pick, week)
+            (player_id, pick, line) = row
             picks[player_id] = (pick, line)
 
         logger.debug("get_picks_at_kickoff_time(): Found these picks at kickoff time {}: {}".format(lock_in_time, picks))
@@ -263,6 +280,7 @@ def lambda_handler(event, context):
         logger.error("Unable to determine request type")
         sys.exit()
 
+    # create lotw database connection
     try:
         conn = get_db_connection()
     except Exception as e:
@@ -325,6 +343,7 @@ def lambda_handler(event, context):
     raw_time = datetime.datetime.now()
     adjusted_minute = raw_time.minute - (raw_time.minute % 5)
     time_now = raw_time.replace(minute=adjusted_minute, second=0, microsecond=0)
+    # time_now = datetime.datetime.now().replace(minute=15, second=0, microsecond=0)
 
     # set pick deadline to current time
     # scheduled events should align with game times to the minute
