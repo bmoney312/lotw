@@ -248,19 +248,21 @@ def lambda_handler(event, context):
     try:
         games_table = "Games_" + str(current_year)
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS count FROM {} WHERE away_team_score IS NOT NULL".format(games_table))
-            played = cur.fetchone()[0]  # Changed from ['count']
+            cur.execute("SELECT COUNT(*) AS count FROM {} WHERE kickoff_time <= %s".format(games_table), (time_now,))
+            played = cur.fetchone()[0]
 
-            cur.execute("SELECT COUNT(*) AS count FROM {} WHERE away_team_score IS NULL".format(games_table))
-            remaining = cur.fetchone()[0]  # Changed from ['count']
+            cur.execute("SELECT COUNT(*) AS count FROM {} WHERE kickoff_time > %s".format(games_table), (time_now,))
+            remaining = cur.fetchone()[0]
 
             cur.execute("SELECT COUNT(*) AS count FROM {}".format(games_table))
-            total = cur.fetchone()[0]  # Changed from ['count']
+            total = cur.fetchone()[0]
 
-            dims = [{'Name': 'Year', 'Value': str(current_year)}]
-            put_cloudwatch_metric(cloudwatch, cw_namespace, 'GamesPlayed', played, dims)
-            put_cloudwatch_metric(cloudwatch, cw_namespace, 'GamesRemaining', remaining, dims)
-            put_cloudwatch_metric(cloudwatch, cw_namespace, 'TotalGames', total, dims)
+            # Yearly dimension only
+            year_dim = [{'Name': 'Year', 'Value': str(current_year)}]
+
+            put_cloudwatch_metric(cloudwatch, cw_namespace, 'GamesPlayed', played, year_dim)
+            put_cloudwatch_metric(cloudwatch, cw_namespace, 'GamesRemaining', remaining, year_dim)
+            put_cloudwatch_metric(cloudwatch, cw_namespace, 'TotalGames', total, year_dim)
 
     except Exception as e:
         logger.error("Failed to get game count metrics: {}".format(str(e)))
