@@ -5,8 +5,8 @@ import logging
 import datetime
 import boto3
 from time import sleep
-from lotw import get_current_week, get_all_paid_players, get_player, get_current_pick, get_team_name
-from lotw import get_auth_token, create_auth_token, datetime_to_string, get_current_year
+from lotw import get_current_week, get_all_paid_players, get_player, get_current_pick
+from lotw import create_auth_token, datetime_to_string, get_current_year
 from lotw import build_html, formatted_line, response, smtp_connect, smtp_send
 from lotw import get_db_connection
 
@@ -16,19 +16,17 @@ logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
 
-def build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token):
+def build_lines_table_row(player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token, team_names_map):
     """
-    Build lines email table row
+    Build lines email table row using in-memory team names map.
     """
-
     f_kickoff_time = datetime_to_string(kickoff_time)
     time_now = datetime.datetime.now().replace(second=0, microsecond=0)
-    away_team_name = get_team_name(conn, away_team_id)
-    home_team_name = get_team_name(conn, home_team_id)
+    away_team_name = team_names_map.get(away_team_id, away_team_id)
+    home_team_name = team_names_map.get(home_team_id, home_team_id)
 
     if home_team_line is None or kickoff_time <= time_now:
         game_line = "OFF"
-
         table_row = """
     <tr>
         <td>{}</td>
@@ -58,60 +56,30 @@ def build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, hom
 
 
 def build_lines_email_head():
-    """
-    Build lines email head
-    """
-
     html = """
 <html>
 <head>
  <head>
    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
     <style>
-         .inline {
-           display: inline;
-         }
-
-         .message {
-           display: inline;
-         }
-
-         body {
-             margin: 12;
-             font-family: "Arial", "Helvetica", sans-serif;
-         }
-         h3 {
-             padding: 2px;
-         }
-         table {
-             border-collapse: collapse;
-             border: 1px solid black;
-         }
-         th {
-             border: 1px solid black;
-             padding: 6px;
-             text-align: left;
-             background-color: lightgrey;
-         }
-         td {
-             border: 1px solid black;
-             padding: 6px;
-             text-align: left;
-         }
+         .inline { display: inline; }
+         .message { display: inline; }
+         body { margin: 12; font-family: "Arial", "Helvetica", sans-serif; }
+         h3 { padding: 2px; }
+         table { border-collapse: collapse; border: 1px solid black; }
+         th { border: 1px solid black; padding: 6px; text-align: left; background-color: lightgrey; }
+         td { border: 1px solid black; padding: 6px; text-align: left; }
     </style>
 </head>
 """
     return html
 
 
-def build_lines_email_body(conn, player_id, week, token):
+def build_lines_email_body(player_id, week, token, games_list, team_names_map):
     """
-    Given database connection and current week, return body of
-    LOTW line email without the html/body tags
+    Given pre-fetched games and team map, return body of LOTW line email without DB roundtrips.
     """
-
     html = "<h3>LOTW: WEEK {} LINES</h3>\n".format(week)
-    # adjust header for playoff rounds
     if week == 19:
         html = "<h3>LOTW: WEEK {} LINES (WILDCARD WEEKEND)</h3>\n".format(week)
     elif week == 20:
@@ -121,7 +89,7 @@ def build_lines_email_body(conn, player_id, week, token):
     elif week == 22:
         html = "<h3>LOTW: SUPER BOWL LINE</h3>\n"
 
-    html = html + """
+    html += """
 <table>
 <tr>
     <th>Kickoff Time&#42;&#42;</th>
@@ -130,26 +98,16 @@ def build_lines_email_body(conn, player_id, week, token):
     <th>Line</th>
 </tr>
 """
+    for row in games_list:
+        kickoff_time, away_team_id, home_team_id, home_team_line = row
+        html += build_lines_table_row(player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token, team_names_map)
 
-    # read games for week and populate table
-    with conn.cursor() as cur:
-        select_statement = "SELECT `kickoff_time`, `away_team_id`, `home_team_id`, `home_team_line` FROM Games_" + str(get_current_year()) + " WHERE `week` = %s ORDER BY kickoff_time"
-        logger.debug("build_lines_email_body(): {}".format(select_statement))
-        cur.execute(select_statement, (week,))
-        rows = cur.fetchall()
-        for row in rows:
-            (kickoff_time, away_team_id, home_team_id, home_team_line) = row
-            logger.debug("build_lines_email_body(): processing row {} {} {} {}".format(kickoff_time, away_team_id, home_team_id, home_team_line))
-            html_row = build_lines_table_row(conn, player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token)
-            html = html + html_row
-
-    html = html + "</table><p>&#42;&#42;<font size=-1><b>all times US/Eastern timezone</b></font></p><br>"
-    html = html + "<br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
+    html += "</table><p>&#42;&#42;<font size=-1><b>all times US/Eastern timezone</b></font></p><br>"
+    html += "<br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
     return html
 
 
 def emit_emails_sent_metric(week, emails_sent_count):
-    # Emit the metric emails_sent_count
     retval = False
     try:
         cloudwatch.put_metric_data(
@@ -170,15 +128,10 @@ def emit_emails_sent_metric(week, emails_sent_count):
         retval = True
     except Exception as e:
         logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
-
     return retval
 
 
 def lambda_handler(event, context):
-    """
-    Email LOTW lines to each player
-    """
-
     logger.info("Received event: " + json.dumps(event, indent=2))
 
     request_type = event.get('detail-type')
@@ -194,14 +147,12 @@ def lambda_handler(event, context):
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
 
-    # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
     mail_host = os.environ['mail_host']
     mail_port = os.environ['mail_port']
     mail_from = '"Brendan Connell" <bmoney312@lock-of-the-week.com>'
 
-    # --- Retry Configuration ---
     try:
         MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
     except ValueError:
@@ -211,9 +162,7 @@ def lambda_handler(event, context):
         RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
     except ValueError:
         RETRY_SLEEP_SECONDS = 15
-    # --- End Retry Configuration ---
 
-    # determine current week
     week = os.environ.get('week')
     player_id = os.environ.get('player_id')
     start_with_player_id = os.environ.get('start_with_player_id')
@@ -237,13 +186,11 @@ def lambda_handler(event, context):
     players = []
     if request_type == "Scheduled Event":
         players = get_all_paid_players(conn)
-        logger.debug("all players: {}".format(players))
     elif request_type == "manual_run":
         if player_id is not None:
             players = get_player(conn, int(player_id))
         else:
             players = get_all_paid_players(conn)
-            logger.debug("all players: {}".format(players))
     elif request_type == "test":
         players = get_player(conn, '0000000001')
     else:
@@ -251,71 +198,77 @@ def lambda_handler(event, context):
         raise
 
     logger.info("Request type is {}".format(request_type))
-    logger.debug("Players {}".format(players))
 
-    # initialize emails sent metric counter
+    # --- Pre-fetch Batch Data (Caches Team Names, Games, and Existing Auth Tokens) ---
+    team_names_map = {}
+    games_list = []
+    auth_tokens_map = {}
+    current_year = get_current_year()
+
+    with conn.cursor() as cur:
+        # 1. Fetch all team names in one call
+        cur.execute("SELECT team_id, CONCAT(city, ' ', nickname) FROM Teams")
+        for tid, tname in cur.fetchall():
+            team_names_map[tid] = tname
+
+        # 2. Fetch games for current week once
+        cur.execute(
+            "SELECT kickoff_time, away_team_id, home_team_id, home_team_line FROM Games_{} WHERE week = %s ORDER BY kickoff_time".format(current_year),
+            (week,)
+        )
+        games_list = cur.fetchall()
+
+        # 3. Fetch existing auth tokens for the week once
+        cur.execute("SELECT player_id, token FROM Auth_Tokens WHERE week = %s", (week,))
+        for pid, tok in cur.fetchall():
+            auth_tokens_map[pid] = tok
+
     emails_sent_count = 0
-
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
-
     if smtp_relay is None:
         logger.error("Error establishing SMTP connection with {}".format(mail_host))
         sys.exit()
 
     for row in players:
         (player_id, player_email, last_name, first_name, titles, is_rookie) = row
-        logger.info("Working on player {} {} {} {}".format(player_id, first_name, last_name, player_email))
 
-        # skip players less than start_with_player_id
-        # if start_with_player_id provided
         if start_with_player_id is not None and request_type != "test":
             if player_id < start_with_player_id:
-                logger.info("Skipping player {} which is less than start_with_player_id {}".format(player_id, start_with_player_id))
                 continue
 
-        # check for existing auth token and create if none exist
-        auth_token = get_auth_token(conn, player_id, week)
+        # Use in-memory token lookup or generate if missing
+        auth_token = auth_tokens_map.get(player_id)
         if auth_token is None:
             logger.info("Creating new auth token for player_id {} week {}".format(player_id, week))
             auth_token = create_auth_token(conn, player_id, week)
+            auth_tokens_map[player_id] = auth_token
         else:
             logger.info("Found existing auth token for player_id {} week {}".format(player_id, week))
 
-        logger.debug("Auth token for player_id {} week {} is {}".format(player_id, week, auth_token))
-
-        # get player data
         (current_pick_id, current_pick, current_line, current_pick_ats, current_pick_lock_in) = get_current_pick(conn, player_id, week)
 
-        # skip email if pick is already locked in
         if current_pick_lock_in:
             if request_type != "test":
                 logger.info("Player {} {} pick locked in {} {}, lines not sent".format(player_id, player_email, current_pick, formatted_line(current_line)))
                 continue
-            else:
-                logger.info("Sending email even though pick for player {} is locked in".format(player_email))
 
-        # build message body
         message = "<body>\n<p>Hello {},<br><br>".format(first_name)
         if current_pick == "NOP" or current_pick is None:
-            message = message + "You do not have a recorded week {} pick. ".format(week)
-            message = message + "Please <b>click the link of a team below</b> to make your selection.<br><br>"
+            message += "You do not have a recorded week {} pick. ".format(week)
+            message += "Please <b>click the link of a team below</b> to make your selection.<br><br>"
         else:
             printable_line = formatted_line(current_line)
-            message = message + "Your week {} pick is <b>{} {}</b>. ".format(week, current_pick, printable_line)
+            message += "Your week {} pick is <b>{} {}</b>. ".format(week, current_pick, printable_line)
             if current_pick_lock_in:
-                message = message + "Your pick is locked in and cannot be changed.<br><br>"
+                message += "Your pick is locked in and cannot be changed.<br><br>"
             else:
-                message = message + "If you would like to change your pick, please click the link of a different team below.<br><br>"
+                message += "If you would like to change your pick, please click the link of a different team below.<br><br>"
 
         message += "<b>DO NOT FORWARD THIS MESSAGE</b>. If you do the recipient will be able to submit picks on your behalf and view your pick for this week.<br><br>"
-
-        # build email body for this player
-        mail_body = build_lines_email_head() + message + build_lines_email_body(conn, player_id, week, auth_token)
+        mail_body = build_lines_email_head() + message + build_lines_email_body(player_id, week, auth_token, games_list, team_names_map)
 
         mail_to = (player_email, 'bmoney312@gmail.com')
         mail_subject = "lotw: week {} lines".format(week)
-
-        # adjust subject for playoff rounds
         if week == 19:
             mail_subject = "lotw: week {} lines (wildcard weekend)".format(week)
         elif week == 20:
@@ -325,66 +278,32 @@ def lambda_handler(event, context):
         elif week == 22:
             mail_subject = "lotw: super bowl line"
 
-        # --- Send email with retry logic ---
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
-
             if email_result is True:
-                logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
                 emails_sent_count += 1
-                break  # Exit retry loop on success
+                break
             else:
-                logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
-                    logger.info("Sleeping for {} seconds before retry...".format(RETRY_SLEEP_SECONDS))
                     smtp_relay.close()
                     sleep(RETRY_SLEEP_SECONDS)
-
-                    # Reconnect to SMTP relay
-                    smtp_relay = None
                     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
-
                     if smtp_relay is None:
-                        logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break  # Break retry loop if reconnect fails
-                else:
-                    logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
+                        break
 
-        # If all retries failed, log and handle
         if not email_sent_successfully:
-            logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
-
-            if smtp_relay is None:
-                logger.error("SMTP connection is dead.")
-            else:
-                logger.info("Closing connection to SMTP relay.")
+            if smtp_relay is not None:
                 smtp_relay.close()
-
-            # emit emails sent metric
             emit_emails_sent_metric(week, emails_sent_count)
-
-            # close database connection
             conn.close()
-
-            # return error if all players do not receive email
-            logger.info("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
             raise RuntimeError("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
-            # return response(504, 'text/html', build_html("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
-        # gentle pacing
         sleep(2)
 
-    # emit the metric on emails sent
     emit_emails_sent_metric(week, emails_sent_count)
-
-    # close database connection
     conn.close()
-
-    # close SMTP connection
     smtp_relay.close()
-
-    # return result
     logger.info("Lines for week {} sent successfully to {} players.".format(week, emails_sent_count))
     return response(200, 'text/html', build_html("Lines for week {} sent successfully to {} players.".format(week, emails_sent_count)))

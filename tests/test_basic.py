@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 import json
+import datetime
 
 # Set required environment variables before importing the Lambda handlers
 # We include dummy AWS credentials to prevent boto3 from searching for real ones during module load
@@ -371,30 +372,43 @@ class TestWeeklyDistributions(unittest.TestCase):
     @patch('email_lines.smtp_connect')
     @patch('email_lines.smtp_send')
     @patch('email_lines.get_all_paid_players')
-    @patch('email_lines.get_auth_token')
     @patch('email_lines.create_auth_token')
     @patch('email_lines.get_current_pick')
     @patch('email_lines.build_lines_email_body')
     @patch('email_lines.cloudwatch')
-    def test_email_lines_uses_existing_token(self, mock_cloudwatch, mock_build_body, mock_get_pick, mock_create_token, mock_get_token, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_db_conn):
-        # Validates that a player who already opened lines doesn't trigger a new token creation
+    def test_email_lines_uses_existing_token(self, mock_cloudwatch, mock_build_body, mock_get_pick, mock_create_token, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_db_conn):
+        # 1. Mock DB connection and cursor for batch pre-fetching
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
+        # Mock cursor fetchall calls in order:
+        # Call 1: Teams map -> [(team_id, team_name)]
+        # Call 2: Games for week -> [(kickoff_time, away_team_id, home_team_id, home_team_line)]
+        # Call 3: Existing auth tokens -> [(player_id, token)]
+        mock_cursor.fetchall.side_effect = [
+            [("SEA", "Seattle Seahawks")],                                    # Teams
+            [(datetime.datetime(2026, 9, 13, 17, 0), "SEA", "DEN", -3)],     # Games
+            [(1, "ABC12345")]                                                 # Auth tokens (Existing token for player 1)
+        ]
+
+        # 2. Mock SMTP
         mock_smtp = MagicMock()
         mock_smtp_connect.return_value = mock_smtp
         mock_smtp_send.return_value = True
 
+        # 3. Mock player and pick details
         mock_get_players.return_value = [(1, "p1@example.com", "Doe", "John", 0, 1)]
-        mock_get_token.return_value = "ABC12345" # Existing token found
-        mock_get_pick.return_value = (None, "NOP", None, None, False) # Pick not locked
+        mock_get_pick.return_value = (None, "NOP", None, None, False)  # Pick not locked
         mock_build_body.return_value = "Mock body"
 
         event = {"detail-type": "Scheduled Event"}
 
         response = email_lines.lambda_handler(event, {})
 
+        # 4. Assertions
         self.assertEqual(response['statusCode'], 200)
         mock_smtp_send.assert_called_once()
         mock_cloudwatch.put_metric_data.assert_called_once()
-        mock_create_token.assert_not_called() # Crucial assertion: no new token minted
+        mock_create_token.assert_not_called()  # Verified: existing token used, no new token minted
