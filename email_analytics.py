@@ -6,142 +6,108 @@ import boto3
 from time import sleep
 from lotw import get_current_year, get_current_week, get_all_paid_players, get_player
 from lotw import response, smtp_connect, smtp_send, get_standings, get_standings_full_name
-from lotw import get_pick_details, get_player_season_details, get_team_name, get_db_connection
+from lotw import get_team_name, get_db_connection, formatted_line
 
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
+
 # --- Helper Functions ---
-
-
-def get_player_yearly_history(conn, player_id, start_year, end_year):
+def build_analytics_cache(conn, start_year, end_year):
     """
-    Get year-by-year win/loss record for a player.
+    Preload all picks and games from start_year to end_year into memory
+    to replace O(Players * Years * Picks) roundtrips with batch queries.
+    """
+    games_cache = {}  # (year, week, team_id) -> (classification, line, site, game_result)
+    picks_cache = {}  # year -> {player_id: [(week, pick, pick_ats), ...]}
+
+    for year in range(start_year, end_year + 1):
+        games_table = "Games_{}".format(year)
+        picks_table = "Picks_{}".format(year)
+
+        # 1. Fetch all games for year
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT home_team_id, away_team_id, home_team_line, away_team_score, home_team_score, week FROM {}".format(games_table))
+                for h_id, a_id, h_line, a_score, h_score, week in cur.fetchall():
+                    # For Home
+                    if h_line is not None:
+                        h_cls = "Favorite" if h_line < 0 else ("Underdog" if h_line > 0 else "Pick'em")
+                        a_cls = "Favorite" if -h_line < 0 else ("Underdog" if -h_line > 0 else "Pick'em")
+                    else:
+                        h_cls, a_cls = None, None
+
+                    g_res = "{} {} v {} {}".format(a_id, a_score, h_id, h_score) if (a_score is not None and h_score is not None) else "-"
+                    games_cache[(year, week, h_id)] = (h_cls, h_line, "Home", g_res)
+                    games_cache[(year, week, a_id)] = (a_cls, -h_line if h_line is not None else None, "Road", g_res)
+        except Exception:
+            pass
+
+        # 2. Fetch all picks for year
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT player_id, week, pick, pick_ats
+                    FROM {}
+                    WHERE lock_in_time IS NOT NULL AND lock_in_time <= CURRENT_TIMESTAMP
+                """.format(picks_table))
+                year_picks = {}
+                for pid, wk, pk, p_ats in cur.fetchall():
+                    if pid not in year_picks:
+                        year_picks[pid] = []
+                    year_picks[pid].append((wk, pk, p_ats))
+                picks_cache[year] = year_picks
+        except Exception:
+            pass
+
+    return games_cache, picks_cache
+
+
+def get_player_yearly_history(player_id, start_year, end_year, picks_cache):
+    """
+    Get year-by-year win/loss record for a player using in-memory cache.
     Returns a list of dicts: [{'year': 2020, 'w': 10, 'l': 8}, ...]
     """
     history = []
     current_year_val = get_current_year()
 
     for year in range(start_year, end_year + 1):
-        table_name = "Picks_{}".format(year)
-        try:
-            with conn.cursor() as cur:
-                # Query to count W/L for specific year
-                sql = """
-                    SELECT pick_ats
-                    FROM {}
-                    WHERE player_id = %s
-                    AND lock_in_time IS NOT NULL
-                    AND lock_in_time <= CURRENT_TIMESTAMP
-                """.format(table_name)
-                cur.execute(sql, (player_id,))
-                rows = cur.fetchall()
+        rows = picks_cache.get(year, {}).get(player_id, [])
 
-            wins = 0
-            losses = 0
-            played = False
-            for row in rows:
-                pick_ats = row[0]
-                if pick_ats is not None:
-                    played = True
-                    if pick_ats > 0:
-                        wins += 1
-                    elif pick_ats <= 0:
-                        losses += 1  # Counts Push as Loss per existing logic
+        wins = 0
+        losses = 0
+        played = False
+        for row in rows:
+            pick_ats = row[2]
+            if pick_ats is not None:
+                played = True
+                if pick_ats > 0:
+                    wins += 1
+                elif pick_ats <= 0:
+                    losses += 1  # Counts Push as Loss per existing logic
 
-            if played:
-                # Adjust record for missing weeks in past seasons
-                if year < current_year_val:
-                    if year <= 2020:
-                        season_weeks = 21
-                    else:
-                        season_weeks = 22
+        if played:
+            # Adjust record for missing weeks in past seasons
+            if year < current_year_val:
+                if year <= 2020:
+                    season_weeks = 21
+                else:
+                    season_weeks = 22
 
-                    total_picks = wins + losses
-                    if total_picks < season_weeks:
-                        losses += (season_weeks - total_picks)
+                total_picks = wins + losses
+                if total_picks < season_weeks:
+                    losses += (season_weeks - total_picks)
 
-                history.append({'year': year, 'w': wins, 'l': losses})
-
-        except Exception:
-            # Table might not exist for that year or future year
-            continue
+            history.append({'year': year, 'w': wins, 'l': losses})
 
     return history
 
-# def get_pick_details(conn, pick_team_id, week, year):
-#    """
-#    Determine the classification (Favorite/Underdog), the specific line,
-#    and the Site (Home/Road) for the picked team.
-#    Returns: (Classification, Line, Site)
-#             e.g. ('Favorite', -3.5, 'Home') or (None, None, None)
-#    """
-#    with conn.cursor() as cur:
-#        # Get game details for the pick
-#        table_name = "Games_{}".format(year)
-#        sql = """
-#            SELECT home_team_id, away_team_id, home_team_line
-#            FROM {}
-#            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
-#        """.format(table_name)
-#        cur.execute(sql, (week, pick_team_id, pick_team_id))
-#        row = cur.fetchone()
-#
-#        if not row:
-#            return None, None, None
-#
-#        home_team, away_team, home_line = row
-#
-#        if home_line is None:
-#            return None, None, None
-#
-#        # Calculate line from the perspective of the PICKED team
-#        # home_team_line is relative to Home (e.g. -3 means Home is favored)
-#        if pick_team_id == home_team:
-#            relevant_line = home_line
-#            site = "Home"
-#        else:
-#            relevant_line = -home_line
-#            site = "Road"
-#
-#        # Determine Classification
-#        if relevant_line < 0:
-#            cls = "Favorite"
-#        elif relevant_line > 0:
-#            cls = "Underdog"
-#        else:
-#            cls = "Pick'em"
-#
-#        return cls, relevant_line, site
 
-# def get_game_result_string(conn, pick_team_id, week, year):
-#    """
-#    Fetch the final game score in the format: 'AwayTeam Score, HomeTeam Score'
-#    using team abbreviations.
-#    """
-#    table_name = "Games_{}".format(year)
-#    with conn.cursor() as cur:
-#        sql = """
-#            SELECT away_team_id, away_team_score, home_team_id, home_team_score
-#            FROM {}
-#            WHERE week = %s AND (home_team_id = %s OR away_team_id = %s)
-#        """.format(table_name)
-#        cur.execute(sql, (week, pick_team_id, pick_team_id))
-#        row = cur.fetchone()
-#
-#        if row:
-#            away, a_score, home, h_score = row
-#            if a_score is not None and h_score is not None:
-#                return "{} {} v {} {}".format(away, a_score, home, h_score)
-#
-#    return "-"
-
-
-def get_player_career_stats(conn, player_id, start_year, end_year):
+def get_player_career_stats(player_id, start_year, end_year, picks_cache, games_cache):
     """
-    Aggregate wins, losses, fav counts, dog counts from start_year to end_year.
+    Aggregate wins, losses, fav counts, dog counts from start_year to end_year using cache.
     """
     total_wins = 0
     total_losses = 0
@@ -152,66 +118,101 @@ def get_player_career_stats(conn, player_id, start_year, end_year):
     current_year_val = get_current_year()
 
     for year in range(start_year, end_year + 1):
-        try:
-            picks_table = "Picks_{}".format(year)
+        rows = picks_cache.get(year, {}).get(player_id, [])
 
-            with conn.cursor() as cur:
-                sql = """
-                    SELECT week, pick, pick_ats
-                    FROM {}
-                    WHERE player_id = %s
-                    AND lock_in_time IS NOT NULL
-                    AND lock_in_time <= CURRENT_TIMESTAMP
-                """.format(picks_table)
-                cur.execute(sql, (player_id,))
-                rows = cur.fetchall()
+        # Track stats for this specific year to apply adjustment logic
+        year_wins = 0
+        year_losses = 0
+        year_picks = 0
 
-                # Track stats for this specific year to apply adjustment logic
-                year_wins = 0
-                year_losses = 0
-                year_picks = 0
+        for row in rows:
+            week, pick, pick_ats = row
 
-                for row in rows:
-                    week, pick, pick_ats = row
+            # W/L Record
+            if pick_ats is not None:
+                if pick_ats > 0:
+                    year_wins += 1
+                elif pick_ats <= 0:
+                    year_losses += 1
 
-                    # W/L Record
-                    if pick_ats is not None:
-                        if pick_ats > 0:
-                            year_wins += 1
-                        elif pick_ats <= 0:
-                            year_losses += 1
+            # Fav/Dog Record
+            game_info = games_cache.get((year, week, pick))
+            if game_info:
+                cls = game_info[0]  # unpack tuple, ignore line and site
+                if cls == "Favorite":
+                    total_fav += 1
+                elif cls == "Underdog":
+                    total_dog += 1
+                elif cls == "Pick'em":
+                    total_pickem += 1
 
-                    # Fav/Dog Record
-                    cls, _, _ = get_pick_details(conn, pick, week, year)  # unpack tuple, ignore line and site
-                    if cls == "Favorite":
-                        total_fav += 1
-                    elif cls == "Underdog":
-                        total_dog += 1
-                    elif cls == "Pick'em":
-                        total_pickem += 1
+        # if player has any picks this year
+        if len(rows) > 0:
+            # Adjust record for missing weeks
+            if year < current_year_val:
+                if year <= 2020:
+                    season_weeks = 21
+                else:
+                    season_weeks = 22
 
-                # if player has any picks this year
-                if len(rows) > 0:
-                    # Adjust record for missing weeks
-                    if year < current_year_val:
-                        if year <= 2020:
-                            season_weeks = 21
-                        else:
-                            season_weeks = 22
+                year_picks = year_wins + year_losses
+                if year_picks < season_weeks:
+                    year_losses += (season_weeks - year_picks)
 
-                        year_picks = year_wins + year_losses
-                        if year_picks < season_weeks:
-                            year_losses += (season_weeks - year_picks)
-
-                    # Add this year wins and losses to total
-                    total_wins += year_wins
-                    total_losses += year_losses
-
-        except Exception as e:
-            logger.warning("WARN: {}".format(str(e)))
-            continue
+            # Add this year wins and losses to total
+            total_wins += year_wins
+            total_losses += year_losses
 
     return total_wins, total_losses, total_fav, total_dog, total_pickem
+
+
+def get_player_season_details_cached(player_id, current_year, picks_cache, games_cache):
+    """
+    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
+    Appends the spread to the pick name from memory.
+    """
+    rows = picks_cache.get(current_year, {}).get(player_id, [])
+    weekly_data = []
+    fav_count = 0
+    dog_count = 0
+    pickem_count = 0
+
+    for row in rows:
+        week, pick, pick_ats = row
+        game_info = games_cache.get((current_year, week, pick), (None, None, "-", "-"))
+        classification, line, site, game_result = game_info
+
+        if classification == "Favorite":
+            fav_count += 1
+        elif classification == "Underdog":
+            dog_count += 1
+        elif classification == "Pick'em":
+            pickem_count += 1
+
+        if line is not None:
+            pick_display = "{} {}".format(pick, formatted_line(line))
+        else:
+            pick_display = pick
+
+        result_str = "-"
+        if pick_ats is not None:
+            if pick_ats > 0:
+                result_str = "Win"
+            elif pick_ats < 0:
+                result_str = "Loss"
+            else:
+                result_str = "Loss (Push)"
+
+        weekly_data.append({
+            'week': week,
+            'pick': pick_display,
+            'game_result': game_result,
+            'site': site if site else "-",
+            'result': result_str,
+            'type': classification if classification else "-"
+        })
+
+    return weekly_data, fav_count, dog_count, pickem_count
 
 
 def get_team_ats_records(conn, year):
@@ -275,7 +276,7 @@ def get_team_ats_records(conn, year):
     return results
 
 
-def get_all_career_standings(conn, start_year, end_year):
+def get_all_career_standings(conn, start_year, end_year, picks_cache, games_cache):
     """
     Aggregate career records for ALL players since start_year.
     Only includes players registered for the current season (end_year).
@@ -293,7 +294,7 @@ def get_all_career_standings(conn, start_year, end_year):
     for player in players:
         # UPDATED: Unpack new columns
         p_id, fname, lname, past_titles, rookie = player
-        w, l, f, d, p = get_player_career_stats(conn, p_id, start_year, end_year)
+        w, l, f, d, p = get_player_career_stats(p_id, start_year, end_year, picks_cache, games_cache)
 
         total = w + l
         # Filter: Omit players with fewer than 42 career picks (two seasons)
@@ -537,11 +538,14 @@ def lambda_handler(event, context):
     # --- Pre-calculate Global Stats (Shared across all emails) ---
     logger.info("Calculating Global Stats...")
 
+    # Load 2018-present picks and games once upfront
+    games_cache, picks_cache = build_analytics_cache(conn, 2018, current_year)
+
     # 1. Team ATS Records for current year
     team_ats_records = get_team_ats_records(conn, current_year)
 
     # 2. All Players Career Standings (2018 to Current)
-    all_career_standings = get_all_career_standings(conn, 2018, current_year)
+    all_career_standings = get_all_career_standings(conn, 2018, current_year, picks_cache, games_cache)
 
     # 3. Current Year Standings (to get rank)
     current_standings = get_standings(conn)  # List of tuples, need to parse to find rank
@@ -566,7 +570,7 @@ def lambda_handler(event, context):
         logger.info("Generating report for {} {} ({})".format(first, last, p_id))
 
         # 1. Get Current Season Details
-        weekly_data, s_fav, s_dog, s_pickem = get_player_season_details(conn, p_id, current_year)
+        weekly_data, s_fav, s_dog, s_pickem = get_player_season_details_cached(p_id, current_year, picks_cache, games_cache)
 
         # Find Rank and Record from current standings
         s_wins = 0
@@ -584,10 +588,10 @@ def lambda_handler(event, context):
 
         # 2. Get Career Stats (Player specific)
         logger.info("Generating career stats for {} {} ({})".format(first, last, p_id))
-        c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(conn, p_id, 2018, current_year)
+        c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(p_id, 2018, current_year, picks_cache, games_cache)
 
         # 3. Get Yearly History (New)
-        yearly_history = get_player_yearly_history(conn, p_id, 2018, current_year)
+        yearly_history = get_player_yearly_history(p_id, 2018, current_year, picks_cache)
 
         # 4. Build HTML
         html_body = build_analytics_html(

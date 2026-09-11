@@ -331,29 +331,48 @@ class TestAnalyticsGeneration(unittest.TestCase):
     @patch('email_analytics.smtp_connect')
     @patch('email_analytics.smtp_send')
     @patch('email_analytics.get_all_paid_players')
+    @patch('email_analytics.build_analytics_cache')
     @patch('email_analytics.get_team_ats_records')
     @patch('email_analytics.get_all_career_standings')
     @patch('email_analytics.get_standings')
-    @patch('email_analytics.get_player_season_details')
+    @patch('email_analytics.get_player_season_details_cached')
     @patch('email_analytics.get_player_career_stats')
     @patch('email_analytics.get_player_yearly_history')
     @patch('email_analytics.cloudwatch')
-    def test_email_analytics(self, mock_cloudwatch, mock_yearly, mock_career, mock_season, mock_standings, mock_career_standings, mock_team_ats, mock_get_players, mock_smtp_send, mock_smtp_connect, mock_db_conn):
-        # Mocking DB connection
+    def test_email_analytics(
+        self,
+        mock_cloudwatch,
+        mock_yearly,
+        mock_career,
+        mock_season_cached,
+        mock_standings,
+        mock_career_standings,
+        mock_team_ats,
+        mock_build_cache,
+        mock_get_players,
+        mock_smtp_send,
+        mock_smtp_connect,
+        mock_db_conn
+    ):
+        # 1. DB & Cache mocks
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
+        mock_build_cache.return_value = ({}, {})
 
-        # Mocking SMTP
+        # 2. SMTP mocks
         mock_smtp = MagicMock()
         mock_smtp_connect.return_value = mock_smtp
         mock_smtp_send.return_value = True
 
-        # Mocking deep SQL analytics dependencies
+        # 3. Analytics data mocks
         mock_get_players.return_value = [(1, "p1@example.com", "Doe", "John", 0, 1)]
         mock_team_ats.return_value = [("Seahawks", 1, 0, 1.0, 1, 0, 0, 0)]
         mock_career_standings.return_value = [(1, "Doe, John", 10, 5, 0.66)]
         mock_standings.return_value = [(1, "Doe", "John", 0, 1, 10, 5, 0.66, 15, "W2")]
-        mock_season.return_value = ([{'week': 1, 'pick': 'SEA -3', 'game_result': 'SEA 20 v DEN 10', 'site': 'Home', 'result': 'Win', 'type': 'Favorite'}], 1, 0, 0)
+        mock_season_cached.return_value = (
+            [{'week': 1, 'pick': 'SEA -3', 'game_result': 'SEA 20 v DEN 10', 'site': 'Home', 'result': 'Win', 'type': 'Favorite'}],
+            1, 0, 0
+        )
         mock_career.return_value = (10, 5, 8, 4, 3)
         mock_yearly.return_value = [{'year': 2025, 'w': 10, 'l': 5}]
 
