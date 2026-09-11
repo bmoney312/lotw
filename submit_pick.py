@@ -1,14 +1,12 @@
-import os
 import sys
 import json
-import pymysql
 import logging
 import datetime
 from lotw import validate_field, check_auth_token
 from lotw import get_kickoff_time, get_current_pick
 from lotw import get_player_info, get_line, datetime_to_string, get_current_year
 from lotw import build_html, build_html_head, formatted_line, response
-from lotw import is_automated_scanner
+from lotw import is_automated_scanner, get_db_connection
 
 # global variables
 logger = logging.getLogger()
@@ -66,20 +64,10 @@ def lambda_handler(event, context):
         logger.info("Prefetch / scanner bot detected from User-Agent: {}. Suppressing response.".format(headers.get('User-Agent', '')))
         return response(200, 'text/plain', "Prefetch detected and ignored")
 
-    db_endpoint = os.environ['db_endpoint']
-    db_port = int(os.environ['db_port'])
-    db_username = os.environ['db_username']
-    db_password = os.environ['db_password']
-    db_name = os.environ['db_name']
-
-    logger.info("Connecting to MySQL database {}".format(db_endpoint))
-
     try:
-        conn = pymysql.connect(host=db_endpoint, port=db_port,
-                               user=db_username, passwd=db_password,
-                               db=db_name, connect_timeout=5)
+        conn = get_db_connection()
     except Exception as e:
-        logger.error("ERROR: Unexpected error: Could not connect to MySQL database - {}".format(str(e)))
+        logger.error("ERROR: Could not connect to MySQL database: {}".format(str(e)))
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
