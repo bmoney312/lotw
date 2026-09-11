@@ -6,9 +6,8 @@ import datetime
 import boto3
 from time import sleep
 from lotw import get_all_paid_players, get_player, get_standings, get_standings_full_name
-from lotw import get_current_week, get_current_pick, get_standings_message, get_current_year
+from lotw import get_current_week, get_standings_message, get_current_year, get_db_connection
 from lotw import build_html, formatted_line, response, build_html_head, smtp_send, smtp_connect
-from lotw import get_db_connection, get_player_season_details
 
 # global variables
 logger = logging.getLogger()
@@ -16,7 +15,7 @@ logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
 
-def get_standings_html(conn, week, standings, current_player_id):
+def get_standings_html(week, standings, current_player_id, picks_map):
     """
     Return string of LOTW standings in HTML table
     """
@@ -50,7 +49,8 @@ def get_standings_html(conn, week, standings, current_player_id):
     for row in standings:
         (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
         full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
-        (pick_id, pick, line, pick_ats, locked_in) = get_current_pick(conn, player_id, week)
+        pick_data = picks_map.get(player_id, ("NOP", None, None, False))
+        (pick, line, pick_ats, locked_in) = pick_data
 
         # highlight row of current player
         highlight_row = False
@@ -126,6 +126,64 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 </tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
 
     return html
+
+
+def get_player_season_details_cached(player_id, player_picks_by_player, games_by_week_team):
+    """
+    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
+    Uses in-memory dictionaries to eliminate N+1 DB calls.
+    """
+    rows = player_picks_by_player.get(player_id, [])
+    weekly_data = []
+    fav_count = 0
+    dog_count = 0
+    pickem_count = 0
+
+    for row in rows:
+        week, pick, pick_ats = row
+        game = games_by_week_team.get((week, pick))
+
+        classification, line, site, game_result = "-", None, "-", "-"
+        if game:
+            home_team_id, away_team_id, home_line, away_score, home_score = game
+            if home_line is not None:
+                if pick == home_team_id:
+                    relevant_line = home_line
+                    site = "Home"
+                else:
+                    relevant_line = -home_line
+                    site = "Road"
+
+                line = relevant_line
+                if relevant_line < 0:
+                    classification = "Favorite"
+                    fav_count += 1
+                elif relevant_line > 0:
+                    classification = "Underdog"
+                    dog_count += 1
+                else:
+                    classification = "Pick'em"
+                    pickem_count += 1
+
+            if away_score is not None and home_score is not None:
+                game_result = "{} {} v {} {}".format(away_team_id, away_score, home_team_id, home_score)
+
+        pick_display = "{} {}".format(pick, formatted_line(line)) if line is not None else pick
+        if pick_ats is not None:
+            result_str = "Win" if pick_ats > 0 else ("Loss" if pick_ats < 0 else "Loss (Push)")
+        else:
+            result_str = "-"
+
+        weekly_data.append({
+            'week': week,
+            'pick': pick_display,
+            'game_result': game_result,
+            'site': site,
+            'result': result_str,
+            'type': classification
+        })
+
+    return weekly_data, fav_count, dog_count, pickem_count
 
 
 def emit_emails_sent_metric(week, emails_sent_count):
@@ -256,6 +314,58 @@ def lambda_handler(event, context):
             logger.error("Unexpected missing value for commish message")
             sys.exit()
 
+    # --- Pre-fetch Current Week Picks and Season Game Results ---
+    picks_map = {}
+    player_picks_by_player = {}
+    games_by_week_team = {}
+
+    with conn.cursor() as cur:
+        # Pre-fetch standings week picks for all players
+        picks_table = "Picks_{}".format(current_year)
+        games_table = "Games_{}".format(current_year)
+
+        cur.execute("""
+            SELECT p.player_id, p.pick,
+                   CASE
+                       WHEN p.pick = g.home_team_id THEN g.home_team_line
+                       WHEN p.pick = g.away_team_id THEN -g.home_team_line
+                       ELSE NULL
+                   END AS line,
+                   p.pick_ats,
+                   (CURRENT_TIMESTAMP >= p.lock_in_time) AS locked_in
+            FROM {} p
+            LEFT JOIN {} g ON g.week = %s AND (p.pick = g.home_team_id OR p.pick = g.away_team_id)
+            WHERE p.week = %s AND p.lock_in_time IS NOT NULL
+            ORDER BY p.submit_time DESC
+        """.format(picks_table, games_table), (standings_week, standings_week))
+
+        for row in cur.fetchall():
+            pid, p_pick, p_line, p_ats, p_locked = row
+            if pid not in picks_map:
+                picks_map[pid] = (p_pick, p_line, p_ats, bool(p_locked))
+
+        # If week > 1, preload all games and all player picks for pick-report tables
+        if standings_week > 1 or request_type == "test":
+            cur.execute("""
+                SELECT home_team_id, away_team_id, home_team_line, away_team_score, home_team_score, week
+                FROM {}
+            """.format(games_table))
+            for h_id, a_id, h_line, a_score, h_score, g_week in cur.fetchall():
+                game_data = (h_id, a_id, h_line, a_score, h_score)
+                games_by_week_team[(g_week, h_id)] = game_data
+                games_by_week_team[(g_week, a_id)] = game_data
+
+            cur.execute("""
+                SELECT player_id, week, pick, pick_ats
+                FROM {}
+                WHERE lock_in_time IS NOT NULL AND lock_in_time <= CURRENT_TIMESTAMP
+                ORDER BY week ASC
+            """.format(picks_table))
+            for pid, p_week, p_pick, p_ats in cur.fetchall():
+                if pid not in player_picks_by_player:
+                    player_picks_by_player[pid] = []
+                player_picks_by_player[pid].append((p_week, p_pick, p_ats))
+
     # initialize emails sent metric counter
     emails_sent_count = 0
 
@@ -288,7 +398,9 @@ def lambda_handler(event, context):
             message = message + "<br><h3>Your picks:</h3>\n"
 
             # Get Current Season Details
-            weekly_data, season_fav, season_dog, season_pickem = get_player_season_details(conn, player_id, current_year)
+            weekly_data, season_fav, season_dog, season_pickem = get_player_season_details_cached(
+                player_id, player_picks_by_player, games_by_week_team
+            )
 
             # Find Rank and Record from current standings
             season_wins = 0
@@ -322,7 +434,7 @@ def lambda_handler(event, context):
             message += "</table><br>\n"
 
         # build email body for this player
-        standings_html = get_standings_html(conn, standings_week, standings, player_id)
+        standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
         mail_body = build_html_head() + "\n<body>\n" + commish_message + message + standings_html + "<br></body></html>"
         mail_to = (player_email, 'bmoney312@gmail.com')
         mail_subject = "lotw: week {} standings".format(standings_week)

@@ -136,14 +136,12 @@ class TestEmailGeneration(unittest.TestCase):
     @patch('email_standings.smtp_send')
     @patch('email_standings.get_all_paid_players')
     @patch('email_standings.get_standings')
-    @patch('email_standings.get_current_pick')
     @patch('email_standings.get_standings_message')
-    @patch('email_standings.get_player_season_details')
+    @patch('email_standings.get_player_season_details_cached')
     def test_email_standings_scheduled_event(
         self,
-        mock_season_details,
+        mock_season_details_cached,
         mock_standings_msg,
-        mock_current_pick,
         mock_get_standings,
         mock_get_players,
         mock_smtp_send,
@@ -151,37 +149,44 @@ class TestEmailGeneration(unittest.TestCase):
         mock_db_conn,
         mock_cloudwatch
     ):
-        # 1. Setup DB and SMTP mocks
+        # 1. Setup DB and cursor mocks for pre-fetch queries
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
+        # Mock cursor.fetchall() for pre-fetching queries:
+        # Call 1: Pre-fetch picks for standings_week -> [(player_id, pick, line, pick_ats, locked_in)]
+        # Call 2: Pre-fetch games for games_by_week_team (if standings_week > 1) -> [(home_id, away_id, home_line, away_score, home_score, week)]
+        # Call 3: Pre-fetch picks for player_picks_by_player (if standings_week > 1) -> [(player_id, week, pick, pick_ats)]
+        mock_cursor.fetchall.side_effect = [
+            [(1, "SEA", -3, 7, True), (2, "DEN", 4, -5, True)],
+            [("SEA", "DEN", -3, 20, 10, 1)],
+            [(1, 1, "SEA", 7), (2, 1, "DEN", -5)]
+        ]
+
+        # 2. Setup SMTP mocks
         mock_smtp = MagicMock()
         mock_smtp_connect.return_value = mock_smtp
         mock_smtp_send.return_value = True
 
-        # 2. Setup mock data
-        # Players: (player_id, email, last, first, titles, rookie)
+        # 3. Setup core standings and player mocks
         mock_get_players.return_value = [
             (1, "p1@example.com", "Doe", "John", 0, 1),
             (2, "p2@example.com", "Smith", "Jane", 1, 0)
         ]
-
-        # Standings: (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak)
         mock_get_standings.return_value = [
             (1, "Doe", "John", 0, 1, 2, 0, 1.000, 10, "W2"),
             (2, "Smith", "Jane", 1, 0, 1, 1, 0.500, -2, "L1")
         ]
-
-        # Current pick: (pick_id, pick, line, pick_ats, locked_in)
-        mock_current_pick.return_value = (101, "SEA", -3, 7, True)
         mock_standings_msg.return_value = "Great week everyone!"
-        mock_season_details.return_value = ([], 1, 0, 0)
+        mock_season_details_cached.return_value = ([], 1, 0, 0)
 
-        # 3. Invoke handler
+        # 4. Invoke handler
         event = {"detail-type": "Scheduled Event"}
         response = email_standings.lambda_handler(event, {})
 
-        # 4. Assertions
+        # 5. Assertions
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(mock_smtp_send.call_count, 2)
         mock_cloudwatch.put_metric_data.assert_called_once()
