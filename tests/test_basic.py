@@ -89,7 +89,7 @@ class TestAPIProcessing(unittest.TestCase):
 
 class TestEmailGeneration(unittest.TestCase):
 
-    @patch('email_picks.pymysql.connect')
+    @patch('email_picks.get_db_connection')
     @patch('email_picks.smtp_connect')
     @patch('email_picks.smtp_send')
     @patch('email_picks.get_all_paid_players')
@@ -98,11 +98,12 @@ class TestEmailGeneration(unittest.TestCase):
     @patch('email_picks.cloudwatch') # Patch the instantiated object directly
     def test_email_picks_scheduled_event(self, mock_cloudwatch, mock_get_picks, mock_get_standings, mock_get_players, mock_smtp_send, mock_smtp_conn, mock_db_conn):
         # 1. Setup Mocks
-        mock_db_conn.return_value = MagicMock()
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
         mock_smtp = MagicMock()
         mock_smtp_conn.return_value = mock_smtp
         mock_smtp_send.return_value = True
-        
+
         # Mocking player list (player_id, player_email, last_name, first_name, titles, is_rookie)
         mock_get_players.return_value = [
             (1, "p1@example.com", "Doe", "John", 0, 1),
@@ -110,16 +111,16 @@ class TestEmailGeneration(unittest.TestCase):
         ]
         mock_get_standings.return_value = []
         mock_get_picks.return_value = {1: ("SEA", -3), 2: ("DEN", 4)}
-        
+
         # 2. Define EventBridge Payload
         event = {
             "detail-type": "Scheduled Event",
             "resources": ["arn:aws:events:us-west-2:123456789:rule/Scheduled_Picks"]
         }
-        
+
         # 3. Execute Handler
         response = email_picks.lambda_handler(event, {})
-        
+
         # 4. Assertions
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(mock_smtp_send.call_count, 2) # Emailed 2 players
