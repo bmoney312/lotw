@@ -6,7 +6,7 @@ import datetime
 import boto3
 from zoneinfo import ZoneInfo
 from time import sleep
-from lotw import get_current_week, get_all_paid_players, get_player, get_line
+from lotw import get_current_week, get_all_paid_players, get_player
 from lotw import get_standings, get_standings_full_name, get_current_year
 from lotw import build_html, formatted_line, response, smtp_connect, smtp_send
 from lotw import get_db_connection
@@ -211,13 +211,13 @@ def get_picks_at_kickoff_time(conn, week, lock_in_time, send_pick_summary):
 
     select_statement = """
         SELECT p.player_id, p.pick,
-               CASE 
-                   WHEN p.pick = g.home_team_id THEN g.home_team_line 
-                   WHEN p.pick = g.away_team_id THEN -g.home_team_line 
-                   ELSE NULL 
+               CASE
+                   WHEN p.pick = g.home_team_id THEN g.home_team_line
+                   WHEN p.pick = g.away_team_id THEN -g.home_team_line
+                   ELSE NULL
                END AS line
         FROM {} p
-        LEFT JOIN {} g 
+        LEFT JOIN {} g
                ON g.week = %s AND (p.pick = g.home_team_id OR p.pick = g.away_team_id)
         WHERE p.week = %s
     """.format(picks_table, games_table)
