@@ -47,6 +47,7 @@ def get_db_connection():
         user=creds['db_username'],
         passwd=creds['db_password'],
         db=creds['db_name'],
+        server_public_key=None,
         connect_timeout=5
     )
     return conn

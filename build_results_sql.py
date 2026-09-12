@@ -110,42 +110,30 @@ def generate_sql_lines(conn, week):
     year = get_current_year()
     table_name = "Games_" + str(year)
 
-    # Fetch actual scores from the web
     web_scores = fetch_web_scores(week)
-
-    # Fetch all games for the specific week from DB
     games = get_all_games(conn, week)
 
     sql_output = ""
 
     for game in games:
-        # Schema of game tuple based on lotw.py:
-        # (game_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, ...)
         away_team_id = game[3]
         home_team_id = game[4]
 
-        # Retrieve scores from our web fetch, default to empty string if not found
         away_score = web_scores.get(away_team_id, "")
         home_score = web_scores.get(home_team_id, "")
 
-        # Only generate SQL if we actually found scores (optional, currently generates empty vals if missing)
-        # Format: UPDATE Games_2025 SET away_team_score = 7, home_team_score = 10 ...
+        # Use valid SQL NULL when score is not found
+        away_val = away_score if away_score != "" else "NULL"
+        home_val = home_score if home_score != "" else "NULL"
+
         sql_line = "UPDATE {} SET away_team_score = {}, home_team_score = {} WHERE away_team_id = '{}' AND home_team_id = '{}' AND week = {};".format(
             table_name,
-            away_score if away_score != "" else "NULL",
-            home_score if home_score != "" else "NULL",
+            away_val,
+            home_val,
             away_team_id,
             home_team_id,
             week
         )
-
-        # Clean up "NULL" to empty space if you strictly want the example format "score = ,",
-        # but standard SQL requires a value or NULL.
-        # To match your exact requested format "score = ,":
-        if away_score == "":
-            sql_line = sql_line.replace("away_team_score = NULL", "away_team_score = ")
-        if home_score == "":
-            sql_line = sql_line.replace("home_team_score = NULL", "home_team_score = ")
 
         sql_output += sql_line + "<br>"
 
