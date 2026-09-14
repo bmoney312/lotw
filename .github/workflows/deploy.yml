@@ -31,6 +31,7 @@ env:
     submit_pick
     update_payment_status
     update_standings
+    update_game_scores
 
 jobs:
   test:
