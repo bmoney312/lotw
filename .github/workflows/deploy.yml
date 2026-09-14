@@ -32,6 +32,7 @@ env:
     update_payment_status
     update_standings
     update_game_scores
+    update_player
 
 jobs:
   test:
