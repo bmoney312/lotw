@@ -3,7 +3,7 @@ import re
 import sys
 import json
 import logging
-from lotw import get_db_connection, response, validate_field
+from lotw import get_db_connection, get_current_year, response, validate_field
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -131,15 +131,37 @@ def validate_and_cast_dynamic(field_name, raw_value, schema):
 def pretty_print_players(conn, player_id=None):
     """
     Retrieves and pretty-prints either a single player or the full Players table.
+    Filters out historical *_registration and *_paid columns, showing only current year.
     """
+    current_year = str(get_current_year())
+    cur_reg_col = f"{current_year}_registration"
+    cur_paid_col = f"{current_year}_paid"
+
     with conn.cursor() as cur:
+        # Fetch all columns to identify table layout
+        cur.execute("DESCRIBE `Players`")
+        all_cols = [row[0] for row in cur.fetchall()]
+
+        # Filter: keep non-year columns + current year registration/paid columns
+        selected_cols = []
+        for col in all_cols:
+            if col.endswith('_registration') or col.endswith('_paid'):
+                if col in (cur_reg_col, cur_paid_col):
+                    selected_cols.append(col)
+            else:
+                selected_cols.append(col)
+
+        cols_clause = ", ".join(f"`{c}`" for c in selected_cols)
+
         if player_id is not None:
-            cur.execute("SELECT * FROM `Players` WHERE `player_id` = %s", (player_id,))
+            sql = f"SELECT {cols_clause} FROM `Players` WHERE `player_id` = %s"
+            cur.execute(sql, (player_id,))
         else:
-            cur.execute("SELECT * FROM `Players` ORDER BY `player_id` ASC")
+            sql = f"SELECT {cols_clause} FROM `Players` ORDER BY `player_id` ASC"
+            cur.execute(sql)
 
         rows = cur.fetchall()
-        headers = [desc[0] for desc in cur.description]
+        headers = selected_cols
 
     return format_ascii_table(headers, rows)
 
