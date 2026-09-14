@@ -89,7 +89,6 @@ def fetch_scores_from_nflverse(target_year, target_week):
 def generate_sql_lines(conn, week):
     """
     Generate SQL UPDATE statements for the given week using nflverse scores.
-    Returns plain newline-separated text.
     """
     year = get_current_year()
     table_name = f"Games_{year}"
@@ -104,7 +103,7 @@ def generate_sql_lines(conn, week):
         logger.warning("No games found in DB for week %s", week)
         return ""
 
-    sql_statements = []
+    sql_output = ""
 
     for game in games:
         # Schema of game tuple based on lotw.py:
@@ -125,14 +124,15 @@ def generate_sql_lines(conn, week):
             f"SET away_team_score = {away_val_str}, home_team_score = {home_val_str} "
             f"WHERE away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}' AND week = {week};"
         )
-        sql_statements.append(sql_line)
 
-    return "\n".join(sql_statements) + "\n"
+        sql_output += sql_line + "<br>"
+
+    return sql_output
 
 
 def lambda_handler(event, context):
     """
-    Generate a plain text SQL payload for updating game results.
+    Generate a SQL file for updating game results using the nflverse feed.
     """
     logger.info("Received event: %s", json.dumps(event, indent=2))
 
@@ -180,5 +180,5 @@ def lambda_handler(event, context):
     # Close database connection
     conn.close()
 
-    # Return as clean plain text
-    return response(200, 'text/plain', sql_content)
+    sql_html = f"<html><body>{sql_content}</body></html>"
+    return response(200, 'text/html', sql_html)
