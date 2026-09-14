@@ -1,5 +1,6 @@
 import os
 import sys
+import csv
 import json
 import logging
 import urllib.request
@@ -9,36 +10,45 @@ from lotw import get_db_connection, get_current_week, get_current_year, get_all_
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# DraftKings NFL Event Group ID
-DK_NFL_URL = "https://sportsbook.draftkings.com/sites/US-SB/api/v5/eventgroups/88808?format=json"
-
-# Mapping DraftKings team name substrings/abbreviations to LOTW team IDs
-DK_TEAM_TO_LOTW = {
-    'cardinals': 'ARI', 'falcons': 'ATL', 'ravens': 'BAL', 'bills': 'BUF',
-    'panthers': 'CAR', 'bears': 'CHI', 'bengals': 'CIN', 'browns': 'CLE',
-    'cowboys': 'DAL', 'broncos': 'DEN', 'lions': 'DET', 'packers': 'GNB',
-    'texans': 'HOU', 'colts': 'IND', 'jaguars': 'JAX', 'chiefs': 'KAN',
-    'chargers': 'LAC', 'rams': 'LAR', 'raiders': 'LVR', 'dolphins': 'MIA',
-    'vikings': 'MIN', 'saints': 'NOR', 'patriots': 'NWE', 'giants': 'NYG',
-    'jets': 'NYJ', 'eagles': 'PHI', 'steelers': 'PIT', 'seahawks': 'SEA',
-    '49ers': 'SFO', 'buccaneers': 'TAM', 'titans': 'TEN', 'commanders': 'WAS'
+# Map nflverse team abbreviations to LOTW database team IDs
+NFLVERSE_TO_LOTW_TEAM_MAP = {
+    'ARI': 'ARI', 'ATL': 'ATL', 'BAL': 'BAL', 'BUF': 'BUF',
+    'CAR': 'CAR', 'CHI': 'CHI', 'CIN': 'CIN', 'CLE': 'CLE',
+    'DAL': 'DAL', 'DEN': 'DEN', 'DET': 'DET', 'GB': 'GNB',
+    'HOU': 'HOU', 'IND': 'IND', 'JAX': 'JAX', 'KC': 'KAN',
+    'LAC': 'LAC', 'LAR': 'LAR', 'LA': 'LAR',
+    'LV': 'LVR', 'LVR': 'LVR', 'OAK': 'LVR',
+    'MIA': 'MIA', 'MIN': 'MIN', 'NO': 'NOR', 'NE': 'NWE',
+    'NYG': 'NYG', 'NYJ': 'NYJ', 'PHI': 'PHI', 'PIT': 'PIT',
+    'SEA': 'SEA', 'SF': 'SFO', 'TB': 'TAM', 'TEN': 'TEN',
+    'WAS': 'WAS', 'WSH': 'WAS',
+    # Direct database key passthroughs
+    'GNB': 'GNB', 'KAN': 'KAN', 'NOR': 'NOR',
+    'NWE': 'NWE', 'SFO': 'SFO', 'TAM': 'TAM'
 }
 
 
-def normalize_line_to_integer(raw_line):
+def normalize_line_to_integer(raw_home_line):
     """
-    Rounds lines according to league rules:
-    - If magnitude is between 6.5 and 7.5 inclusive, round to 7 (maintaining sign).
-    - Otherwise, strip the half point (.5) to make it an integer.
+    Rounds home team spread according to LOTW league rules:
+    - If magnitude is between 6.5 and 7.5 inclusive, round to 7 (preserving sign).
+    - Otherwise, truncate the half-point (.5) to convert to an integer.
     """
-    if raw_line is None:
+    if raw_home_line is None or str(raw_home_line).strip() == "":
         return None
 
-    line = float(raw_line)
+    try:
+        line = float(raw_home_line)
+    except (ValueError, TypeError):
+        return None
+
+    if line == 0:
+        return 0
+
     sign = -1 if line < 0 else 1
     abs_line = abs(line)
 
-    # Always snap 6.5, 7.0, 7.5 to 7
+    # Round 6.5, 7.0, 7.5 to 7
     if 6.5 <= abs_line <= 7.5:
         return sign * 7
 
@@ -46,82 +56,69 @@ def normalize_line_to_integer(raw_line):
     return sign * int(abs_line)
 
 
-def fetch_draftkings_spreads():
+def fetch_nflverse_spreads(target_year, target_week):
     """
-    Queries DraftKings Sportsbook API for NFL game lines.
-    Returns a dictionary of {(away_team_id, home_team_id): home_team_line_int}
+    Fetches game spread lines from the open nflverse CSV feed.
+    Returns a dictionary: { (away_team_id, home_team_id): home_team_line_int, home_team_id: home_team_line_int }
     """
-    logger.info("Fetching odds from DraftKings API: %s", DK_NFL_URL)
+    url = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"
+    logger.info("Fetching lines from nflverse: %s", url)
+
     req = urllib.request.Request(
-        DK_NFL_URL,
-        headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json'
-        }
+        url,
+        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     )
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
+            lines = resp.read().decode('utf-8').splitlines()
     except Exception as e:
-        logger.error("Failed to fetch odds from DraftKings: %s", str(e))
+        logger.error("Failed to download lines from nflverse: %s", str(e))
         return {}
 
-    events = {ev['eventId']: ev for ev in data.get('events', [])}
-    odds_map = {}
+    reader = csv.DictReader(lines)
+    spreads_map = {}
 
-    # Category 488 / subcategory 4511 or standard game lines market
-    for category in data.get('eventGroup', {}).get('offerCategories', []):
-        for subcat in category.get('offerSubcategoryDescriptors', []):
-            offer_table = subcat.get('offerSubcategory', {}).get('offers', [])
-            for offer_row in offer_table:
-                for offer in offer_row:
-                    # Look for point spread market
-                    if offer.get('label') != "Spread":
-                        continue
+    for row in reader:
+        try:
+            row_season = int(row.get('season', 0))
+            row_week = int(row.get('week', 0))
+        except (ValueError, TypeError):
+            continue
 
-                    event_id = offer.get('eventId')
-                    event = events.get(event_id)
-                    if not event:
-                        continue
+        if row_season != int(target_year) or row_week != int(target_week):
+            continue
 
-                    team1_name = event.get('teamName1', '').lower()
-                    team2_name = event.get('teamName2', '').lower()
+        away_raw = row.get('away_team', '').strip().upper()
+        home_raw = row.get('home_team', '').strip().upper()
+        raw_spread = row.get('spread_line', '').strip()
 
-                    # Resolve away and home team IDs
-                    team1_id = next((v for k, v in DK_TEAM_TO_LOTW.items() if k in team1_name), None)
-                    team2_id = next((v for k, v in DK_TEAM_TO_LOTW.items() if k in team2_name), None)
+        away_id = NFLVERSE_TO_LOTW_TEAM_MAP.get(away_raw, away_raw)
+        home_id = NFLVERSE_TO_LOTW_TEAM_MAP.get(home_raw, home_raw)
 
-                    if not team1_id or not team2_id:
-                        continue
+        if raw_spread:
+            # In nflverse: positive spread_line means home favored by X -> home_line = -X
+            # negative spread_line means away favored by X -> home_line = +X
+            try:
+                home_team_spread = -float(raw_spread)
+                int_line = normalize_line_to_integer(home_team_spread)
+                spreads_map[(away_id, home_id)] = int_line
+                spreads_map[home_id] = int_line
+            except ValueError:
+                continue
 
-                    # DraftKings outcomes: match home team spread
-                    for outcome in offer.get('outcomes', []):
-                        label = outcome.get('label', '').lower()
-                        # Team2 is conventionally the home team in DraftKings event definitions
-                        if any(k in label for k in DK_TEAM_TO_LOTW if DK_TEAM_TO_LOTW[k] == team2_id):
-                            raw_spread = outcome.get('line')
-                            if raw_spread is not None:
-                                int_line = normalize_line_to_integer(raw_spread)
-                                # Map key by (away_id, home_id) and (home_id,)
-                                odds_map[(team1_id, team2_id)] = int_line
-                                odds_map[team2_id] = int_line
-
-    logger.info("Parsed %d spread lines from DraftKings", len(odds_map))
-    return odds_map
+    logger.info("Parsed %d game spreads for week %s", len(spreads_map) // 2, target_week)
+    return spreads_map
 
 
 def generate_sql_lines(conn, week):
     """
-    Generate SQL UPDATE statements for the given week with DraftKings lines filled in.
+    Generate SQL UPDATE statements for the given week with spreads filled in.
     """
     year = get_current_year()
     table_name = f"Games_{year}"
 
-    # Fetch DraftKings spreads
-    dk_spreads = fetch_draftkings_spreads()
-
-    # Fetch all games for the specific week from DB
+    spreads_map = fetch_nflverse_spreads(year, week)
     games = get_all_games(conn, week)
 
     if not games:
@@ -135,11 +132,11 @@ def generate_sql_lines(conn, week):
         away_team_id = game[3]
         home_team_id = game[4]
 
-        # Look up line matching (away, home) pair or by home team ID
-        line = dk_spreads.get((away_team_id, home_team_id), dk_spreads.get(home_team_id))
+        # Match by (away, home) pair or by home team ID
+        line = spreads_map.get((away_team_id, home_team_id), spreads_map.get(home_team_id))
         line_str = str(line) if line is not None else ""
 
-        # Format matches expected SQL: UPDATE Games_YYYY SET home_team_line = -3 WHERE game_id = 123 AND home_team_id = 'DEN';
+        # Format: UPDATE Games_YYYY SET home_team_line = -3 WHERE game_id = 123 AND home_team_id = 'DEN';
         sql_line = (
             f"UPDATE {table_name} SET home_team_line = {line_str} "
             f"WHERE game_id = {game_id} AND home_team_id = '{home_team_id}';"
@@ -151,7 +148,7 @@ def generate_sql_lines(conn, week):
 
 def lambda_handler(event, context):
     """
-    Generate a SQL file for updating game lines automatically from DraftKings.
+    Generate a SQL file for updating game lines.
     """
     logger.info("Received event: %s", json.dumps(event, indent=2))
 
@@ -159,7 +156,6 @@ def lambda_handler(event, context):
     if request_type is None:
         request_type = event.get('requestContext', {}).get('stage', 'manual_run')
 
-    # Create lotw database connection
     try:
         conn = get_db_connection()
     except Exception as e:
