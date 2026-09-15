@@ -240,21 +240,24 @@ def lambda_handler(event, context):
     logger.info("Standings week set to {}".format(standings_week))
     logger.info("Current time is {}".format(datetime.datetime.now()))
 
-    # compute standings
-    logger.info("Updating game ATS values")
-    (result, message) = update_game_ats(conn, standings_week)
-    if result is not True:
-        conn.close()
-        return response(200, 'text/html', build_html("Update of game ATS failed for week {}: {}".format(week, message)))
+    # Only update Game and Pick ATS for the current active year
+    if year == current_year:
+        logger.info("Updating game ATS values")
+        (result, message) = update_game_ats(conn, standings_week)
+        if result is not True:
+            conn.close()
+            return response(200, 'text/html', build_html("Update of game ATS failed for week {}: {}".format(week, message)))
 
-    logger.info("Updating pick ATS values")
-    (result, message) = update_pick_ats(conn, standings_week)
-    if result is not True and standings_week > 0:
-        conn.close()
-        return response(200, 'text/html', build_html("Update of pick ATS failed for week {}: {}".format(week, message)))
+        logger.info("Updating pick ATS values")
+        (result, message) = update_pick_ats(conn, standings_week)
+        if result is not True and standings_week > 0:
+            conn.close()
+            return response(200, 'text/html', build_html("Update of pick ATS failed for week {}: {}".format(week, message)))
 
-    if standings_week == 0:
-        logger.info("Continuing with update because standings week is 0")
+        if standings_week == 0:
+            logger.info("Continuing with update because standings week is 0")
+    else:
+        logger.info("Skipping game and pick ATS updates for previous year {} (data already backfilled)".format(year))
 
     # update Standings table in database
     logger.info("Updating standings table")
