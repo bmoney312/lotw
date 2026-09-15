@@ -273,7 +273,6 @@ def lambda_handler(event, context):
 
         target_year = parsed_year
     else:
-        # Default behavior: target_year is current_year
         target_year = current_year
 
     # Enforce manual_run only for current year
@@ -352,19 +351,23 @@ def lambda_handler(event, context):
     standings = get_standings_by_year(conn, target_year)
     total_players_season = len(standings)
 
-    # Commissioner message
-    if standings_week == 0:
-        commish_message = 'Testing. Week 0 Standings.<br>'
+    # Commissioner message logic: skipped for previous years
+    if target_year < current_year:
+        logger.info("Target year %s is prior to current year %s. Skipping commissioner message.", target_year, current_year)
+        commish_message = ""
     else:
-        commish_message = get_standings_message_by_year(conn, standings_week, target_year)
-
-    if commish_message is None:
-        if request_type == "test":
-            commish_message = f"Testing standings for week {standings_week}.<br>"
+        if standings_week == 0:
+            commish_message = 'Testing. Week 0 Standings.<br>'
         else:
-            logger.error("Unexpected missing value for commish message")
-            conn.close()
-            sys.exit()
+            commish_message = get_standings_message_by_year(conn, standings_week, target_year)
+
+        if commish_message is None:
+            if request_type == "test":
+                commish_message = f"Testing standings for week {standings_week}.<br>"
+            else:
+                logger.error("Unexpected missing value for commish message")
+                conn.close()
+                sys.exit()
 
     picks_map = {}
     player_picks_by_player = {}
@@ -469,16 +472,20 @@ def lambda_handler(event, context):
         standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
         mail_body = f"{build_html_head()}\n<body>\n{commish_message}{message}{standings_html}<br></body></html>"
         mail_to = (player_email, 'bmoney312@gmail.com')
-        mail_subject = f"lotw: week {standings_week} standings"
 
-        if standings_week == 19:
-            mail_subject = f"lotw: week {standings_week} standings (wildcard weekend)"
-        elif standings_week == 20:
-            mail_subject = f"lotw: week {standings_week} standings (divisional playoffs)"
-        elif standings_week == 21:
-            mail_subject = f"lotw: week {standings_week} standings (conference championships)"
-        elif standings_week == 22:
-            mail_subject = f"lotw: week {standings_week} standings (super bowl)"
+        # Determine email subject
+        if target_year < current_year:
+            mail_subject = f"lotw: final standings ({target_year}-{target_year + 1})"
+        else:
+            mail_subject = f"lotw: week {standings_week} standings"
+            if standings_week == 19:
+                mail_subject = f"lotw: week {standings_week} standings (wildcard weekend)"
+            elif standings_week == 20:
+                mail_subject = f"lotw: week {standings_week} standings (divisional playoffs)"
+            elif standings_week == 21:
+                mail_subject = f"lotw: week {standings_week} standings (conference championships)"
+            elif standings_week == 22:
+                mail_subject = f"lotw: week {standings_week} standings (super bowl)"
 
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
