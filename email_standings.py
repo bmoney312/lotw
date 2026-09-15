@@ -526,5 +526,5 @@ def lambda_handler(event, context):
     emit_emails_sent_metric(standings_week, emails_sent_count, target_year)
     conn.close()
     smtp_relay.close()
-    logger.info("Standings for week %s sent successfully to %s players.", standings_week, emails_sent_count)
-    return response(200, 'text/html', build_html(f"Standings for week {standings_week} sent successfully to {emails_sent_count} players."))
+    logger.info("Standings for week %s year %s sent successfully to %s players.", standings_week, target_year, emails_sent_count)
+    return response(200, 'text/html', build_html(f"Standings for week {standings_week} year {target_year} sent successfully to {emails_sent_count} players."))
