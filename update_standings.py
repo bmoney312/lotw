@@ -4,12 +4,26 @@ import json
 import logging
 import datetime
 from lotw import update_game_ats, update_pick_ats, validate_field, get_current_year
-from lotw import get_all_player_picks, get_all_current_players, get_current_week
+from lotw import get_all_player_picks, get_current_week
 from lotw import build_html, response, get_db_connection
 
 # global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def get_all_current_players_by_year(conn, year):
+    """
+    Return all rows in LOTW Players database
+    who are registered to play in the specified year.
+    """
+    with conn.cursor() as cur:
+        select_statement = (
+            "SELECT `player_id`, `email`, `last_name`, `first_name`, `past_titles`, `rookie` "
+            "FROM Players WHERE `" + str(year) + "_registration` = 1"
+        )
+        cur.execute(select_statement)
+        return cur.fetchall()
 
 
 def get_player_streak(conn, player_id, current_standings_week):
@@ -60,17 +74,17 @@ def get_player_streak(conn, player_id, current_standings_week):
         return "?"
 
 
-def update_standings_table(conn, week):
+def update_standings_table(conn, week, year):
     """
     Update Standings table based on picks thru and including week provided
 
     For each player in Players table, compute wins / losses / win% /
-    ATS for [week] and update Standings
+    ATS for [week] and update Standings for [year]
 
     returns nothing
     """
 
-    all_players = get_all_current_players(conn)
+    all_players = get_all_current_players_by_year(conn, year)
 
     for player in all_players:
         (player_id, player_email, last_name, first_name, titles, is_rookie) = player
@@ -78,7 +92,7 @@ def update_standings_table(conn, week):
 
         # add player if not yet in Standings table
         new_standings_entry = False
-        if not validate_field(conn, player_id, 'player_id', "Standings_" + str(get_current_year())):
+        if not validate_field(conn, player_id, 'player_id', "Standings_" + str(year)):
             new_standings_entry = True
 
         # compute Standings table entry for player
@@ -127,10 +141,10 @@ def update_standings_table(conn, week):
         try:
             with conn.cursor() as cur:
                 if new_standings_entry:
-                    sql = "INSERT INTO `Standings_" + str(get_current_year()) + "` (`player_id`, `wins`, `losses`, `win_percentage`, `ats_points`, `streak`) VALUES (%s, %s, %s, %s, %s, %s)"
+                    sql = "INSERT INTO `Standings_" + str(year) + "` (`player_id`, `wins`, `losses`, `win_percentage`, `ats_points`, `streak`) VALUES (%s, %s, %s, %s, %s, %s)"
                     cur.execute(sql, (player_id, player_wins, player_losses, player_win_percentage, player_ats, streak_string))
                 else:
-                    sql = "UPDATE `Standings_" + str(get_current_year()) + "` SET `wins`=%s, `losses`=%s, `win_percentage`=%s, `ats_points`=%s, `streak`=%s WHERE `player_id` = %s"
+                    sql = "UPDATE `Standings_" + str(year) + "` SET `wins`=%s, `losses`=%s, `win_percentage`=%s, `ats_points`=%s, `streak`=%s WHERE `player_id` = %s"
                     cur.execute(sql, (player_wins, player_losses, player_win_percentage, player_ats, streak_string, player_id))
 
                 logger.debug("update_standings_table(): {}".format(sql))
@@ -174,6 +188,29 @@ def lambda_handler(event, context):
 
     logger.info("Request type is {}".format(request_type))
 
+    # --- Determine and Validate Year ---
+    current_year = get_current_year()
+    year_env = os.environ.get('year')
+
+    if year_env is not None and year_env != '':
+        try:
+            year = int(year_env)
+        except ValueError:
+            error_msg = "Invalid year value: '{}' is not an integer".format(year_env)
+            logger.error(error_msg)
+            conn.close()
+            return response(400, 'text/html', build_html(error_msg))
+
+        if not (2000 < year <= current_year):
+            error_msg = "Invalid year: {}. Year must be > 2000 and <= current year ({})".format(year, current_year)
+            logger.error(error_msg)
+            conn.close()
+            return response(400, 'text/html', build_html(error_msg))
+    else:
+        year = current_year
+
+    logger.info("Operating on year: {}".format(year))
+
     # week to compute standings, set to last week unless
     # environment variable week set then use same week
     standings_week = 0
@@ -186,6 +223,7 @@ def lambda_handler(event, context):
         week = get_current_week(conn)
         if week is None:
             logger.error("ERROR: Unable to determine current week!")
+            conn.close()
             sys.exit()
         standings_week = int(week) - 1
     else:
@@ -199,11 +237,13 @@ def lambda_handler(event, context):
     logger.info("Updating game ATS values")
     (result, message) = update_game_ats(conn, standings_week)
     if result is not True:
+        conn.close()
         return response(200, 'text/html', build_html("Update of game ATS failed for week {}: {}".format(week, message)))
 
     logger.info("Updating pick ATS values")
     (result, message) = update_pick_ats(conn, standings_week)
     if result is not True and standings_week > 0:
+        conn.close()
         return response(200, 'text/html', build_html("Update of pick ATS failed for week {}: {}".format(week, message)))
 
     if standings_week == 0:
@@ -211,7 +251,7 @@ def lambda_handler(event, context):
 
     # update Standings table in database
     logger.info("Updating standings table")
-    update_standings_table(conn, standings_week)
+    update_standings_table(conn, standings_week, year)
 
     # close database connection
     conn.close()
