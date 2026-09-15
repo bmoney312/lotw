@@ -135,12 +135,10 @@ class TestEmailGeneration(unittest.TestCase):
     @patch('email_standings.smtp_connect')
     @patch('email_standings.smtp_send')
     @patch('email_standings.get_all_paid_players')
-    @patch('email_standings.get_standings')
-    @patch('email_standings.get_standings_message')
-    @patch('email_standings.get_player_season_details_cached')
+    @patch('email_standings.get_standings_by_year')
+    @patch('email_standings.get_standings_message_by_year')
     def test_email_standings_scheduled_event(
         self,
-        mock_season_details_cached,
         mock_standings_msg,
         mock_get_standings,
         mock_get_players,
@@ -155,14 +153,11 @@ class TestEmailGeneration(unittest.TestCase):
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
-        # Mock cursor.fetchall() for pre-fetching queries:
-        # Call 1: Pre-fetch picks for standings_week -> [(player_id, pick, line, pick_ats, locked_in)]
-        # Call 2: Pre-fetch games for games_by_week_team (if standings_week > 1) -> [(home_id, away_id, home_line, away_score, home_score, week)]
-        # Call 3: Pre-fetch picks for player_picks_by_player (if standings_week > 1) -> [(player_id, week, pick, pick_ats)]
-        mock_cursor.fetchall.side_effect = [
-            [(1, "SEA", -3, 7, True), (2, "DEN", 4, -5, True)],
-            [("SEA", "DEN", -3, 20, 10, 1)],
-            [(1, 1, "SEA", 7), (2, 1, "DEN", -5)]
+        # Mock cursor.fetchall() for the picks pre-fetch query:
+        # [(player_id, pick, line, pick_ats, locked_in)]
+        mock_cursor.fetchall.return_value = [
+            (1, "SEA", -3, 7, True),
+            (2, "DEN", 4, -5, True)
         ]
 
         # 2. Setup SMTP mocks
@@ -180,7 +175,6 @@ class TestEmailGeneration(unittest.TestCase):
             (2, "Smith", "Jane", 1, 0, 1, 1, 0.500, -2, "L1")
         ]
         mock_standings_msg.return_value = "Great week everyone!"
-        mock_season_details_cached.return_value = ([], 1, 0, 0)
 
         # 4. Invoke handler
         event = {"detail-type": "Scheduled Event"}
@@ -190,6 +184,8 @@ class TestEmailGeneration(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         self.assertEqual(mock_smtp_send.call_count, 2)
         mock_cloudwatch.put_metric_data.assert_called_once()
+        mock_get_standings.assert_called_once()
+        mock_standings_msg.assert_called_once()
 
 
 class TestDatabaseUpdates(unittest.TestCase):
