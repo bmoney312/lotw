@@ -211,23 +211,30 @@ def lambda_handler(event, context):
 
     logger.info("Operating on year: {}".format(year))
 
-    # week to compute standings, set to last week unless
-    # environment variable week set then use same week
+    # determine week
     standings_week = 0
 
-    # determine current week
-    week = os.environ.get('week')
-
-    # if week is not provided
-    if week is None:
-        week = get_current_week(conn)
-        if week is None:
-            logger.error("ERROR: Unable to determine current week!")
-            conn.close()
-            sys.exit()
-        standings_week = int(week) - 1
+    if year < current_year:
+        # Previous year: automatically set to season finale week
+        if year < 2021:
+            standings_week = 21
+        else:
+            standings_week = 22
+        week = standings_week
+        logger.info("Previous year {} detected. Setting week to {}".format(year, standings_week))
     else:
-        standings_week = int(week)
+        # Current year: use environment variable or calculate from current date
+        week = os.environ.get('week')
+
+        if week is None:
+            week = get_current_week(conn)
+            if week is None:
+                logger.error("ERROR: Unable to determine current week!")
+                conn.close()
+                sys.exit()
+            standings_week = int(week) - 1
+        else:
+            standings_week = int(week)
 
     logger.info("Current week set to {}".format(week))
     logger.info("Standings week set to {}".format(standings_week))
