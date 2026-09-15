@@ -8,15 +8,28 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def check_player_name_exists(conn, first_name, last_name):
+    """
+    Check if a player with the same first and last name already exists in the Players table.
+    """
+    with conn.cursor() as cur:
+        sql = "SELECT `player_id` FROM `Players` WHERE `first_name` = %s AND `last_name` = %s"
+        cur.execute(sql, (str(first_name), str(last_name)))
+        return cur.fetchone() is not None
+
+
 def add_lotw_player(conn, email, first_name, last_name, testflag):
     """
     Add new player to Lock of the Week
-    Returns tuple of new player_id + message upon success, tuple of None + error message upon failure
+    Returns tuple of (True, message) upon success, tuple of (False, error message) upon failure
     """
-    # first confirm player email does not exist in Players table
-    result = validate_field(conn, str(email), str("email"), str("Players"))
-    if result is True:
+    # confirm player email does not exist in Players table
+    if validate_field(conn, str(email), "email", "Players"):
         return (False, "Player email {} already exists!".format(email))
+
+    # confirm player with exact same first and last name does not exist
+    if check_player_name_exists(conn, first_name, last_name):
+        return (False, "Player with name {} {} already exists!".format(first_name, last_name))
 
     logger.info("Adding new player: {} {}, {}".format(first_name, last_name, email))
     current_year = get_current_year()
