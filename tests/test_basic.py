@@ -252,12 +252,13 @@ class TestMetricsEmission(unittest.TestCase):
 
 class TestRegistrationFlow(unittest.TestCase):
 
+    @patch('process_registration.get_current_week')
     @patch('process_registration.get_db_connection')
     @patch('process_registration.validate_field')
     @patch('process_registration.submit_registration')
     @patch('process_registration.get_player_info')
     @patch('process_registration.send_email')
-    def test_process_registration_success(self, mock_send_email, mock_get_player_info, mock_submit, mock_validate, mock_db_conn):
+    def test_process_registration_success(self, mock_send_email, mock_get_player_info, mock_submit, mock_validate, mock_db_conn, mock_get_current_week):
         # Setup mocks for receiving a player's opt-in choice
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
@@ -265,6 +266,9 @@ class TestRegistrationFlow(unittest.TestCase):
         mock_submit.return_value = (True, "Your registration was updated successfully!")
         mock_get_player_info.return_value = ("test@example.com", "John", "Doe")
         mock_send_email.return_value = True
+
+        # Mock the current week to 1 so the registration is allowed
+        mock_get_current_week.return_value = 1
 
         # Simulate an API Gateway GET request with query strings
         event = {
@@ -274,12 +278,36 @@ class TestRegistrationFlow(unittest.TestCase):
             }
         }
 
+        # Call lambda handler only once
         response = process_registration.lambda_handler(event, {})
 
         self.assertEqual(response['statusCode'], 200)
         self.assertIn("registration was updated successfully", response['body'])
         mock_submit.assert_called_once_with(mock_conn, 123, True, unittest.mock.ANY)
         mock_send_email.assert_called_once()
+
+    @patch('process_registration.get_current_week')
+    @patch('process_registration.get_db_connection')
+    def test_process_registration_rejects_after_week_1(self, mock_db_conn, mock_get_current_week):
+        # Setup basic connection mock
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
+        # Mock the current week to 2, triggering the new rejection logic
+        mock_get_current_week.return_value = 2
+
+        event = {
+            "queryStringParameters": {
+                "id": "123",
+                "registration": "true"
+            }
+        }
+
+        response = process_registration.lambda_handler(event, {})
+
+        # Assert it immediately exits with a 403 Forbidden and the correct message
+        self.assertEqual(response['statusCode'], 403)
+        self.assertIn("Registration is closed after week 1.", response['body'])
 
     @patch('email_registration.cloudwatch')
     @patch('email_registration.get_db_connection')
@@ -306,7 +334,9 @@ class TestRegistrationFlow(unittest.TestCase):
         response = email_registration.lambda_handler(event, {})
 
         self.assertEqual(response['statusCode'], 200)
-        self.assertEqual(mock_smtp_send.call_count, 1) # Ensure only player 1 receives an email
+        # Ensure only player 1 receives an email
+        self.assertEqual(mock_smtp_send.call_count, 1)
+
 
 class TestPlayerManagement(unittest.TestCase):
 

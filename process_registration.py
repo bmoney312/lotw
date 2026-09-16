@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import logging
-from lotw import validate_field, get_player_info, get_current_year, get_db_connection
+from lotw import validate_field, get_player_info, get_current_year, get_db_connection, get_current_week
 from lotw import build_html_message, build_html_response, send_email, response
 
 # global variables
@@ -56,6 +56,13 @@ def lambda_handler(event, context):
         sys.exit()
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
+
+    # Exit immediately if the current week is > 1
+    current_week = get_current_week(conn)
+    if current_week is not None and int(current_week) > 1:
+        logger.info("Registration attempt blocked: current week is {}.".format(current_week))
+        conn.close()
+        return response(403, 'text/html', build_html_response("Registration is closed after week 1."))
 
     query_string_params = event.get('queryStringParameters')
 
