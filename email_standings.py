@@ -325,6 +325,7 @@ def lambda_handler(event, context):
     picks_map = {}
     player_picks_by_player = {}
     games_by_week_team = {}
+    weekly_games = []
 
     with conn.cursor() as cur:
         # Pre-fetch standings week picks for all players
@@ -360,6 +361,8 @@ def lambda_handler(event, context):
             game_data = (h_id, a_id, h_line, a_score, h_score)
             games_by_week_team[(g_week, h_id)] = game_data
             games_by_week_team[(g_week, a_id)] = game_data
+            if g_week == standings_week:
+                weekly_games.append(game_data)
 
         cur.execute("""
             SELECT player_id, week, pick, pick_ats
@@ -388,6 +391,37 @@ def lambda_handler(event, context):
     field_losses = total_players_season - field_wins
     field_pct = (field_wins / total_players_season * 100) if total_players_season > 0 else 0.0
 
+    # Calculate Favorites and Underdogs ATS records for the week
+    fav_wins = 0
+    fav_losses = 0
+    dog_wins = 0
+    dog_losses = 0
+
+    for h_id, a_id, h_line, a_score, h_score in weekly_games:
+        if h_line is not None and a_score is not None and h_score is not None and h_line != 0:
+            if h_line < 0:
+                fav_ats = h_line + (h_score - a_score)
+            else:
+                fav_ats = -h_line + (a_score - h_score)
+
+            dog_ats = -fav_ats
+
+            if fav_ats > 0:
+                fav_wins += 1
+            else:
+                fav_losses += 1
+
+            if dog_ats > 0:
+                dog_wins += 1
+            else:
+                dog_losses += 1
+
+    fav_total = fav_wins + fav_losses
+    fav_pct = (fav_wins / fav_total * 100) if fav_total > 0 else 0.0
+
+    dog_total = dog_wins + dog_losses
+    dog_pct = (dog_wins / dog_total * 100) if dog_total > 0 else 0.0
+
     winning_picks = {team: count for team, count in pick_counts.items() if pick_ats_map[team] > 0}
     losing_picks = {team: count for team, count in pick_counts.items() if pick_ats_map[team] <= 0}
 
@@ -405,18 +439,20 @@ def lambda_handler(event, context):
         max_ats = max(pick_ats_map.values())
         best_teams = [team for team, ats in pick_ats_map.items() if ats == max_ats]
         best_ats_str = "+{}".format(max_ats) if max_ats > 0 else str(max_ats)
-        best_pick_str = "{} ({} ATS)".format(", ".join(best_teams), best_ats_str)
+        best_pick_str = "{} ({} ATS Points)".format(", ".join(best_teams), best_ats_str)
 
         min_ats = min(pick_ats_map.values())
         worst_teams = [team for team, ats in pick_ats_map.items() if ats == min_ats]
         worst_ats_str = "+{}".format(min_ats) if min_ats > 0 else str(min_ats)
-        worst_pick_str = "{} ({} ATS)".format(", ".join(worst_teams), worst_ats_str)
+        worst_pick_str = "{} ({} ATS Points)".format(", ".join(worst_teams), worst_ats_str)
     else:
         best_pick_str = "-"
         worst_pick_str = "-"
 
     trends_html = "<h3>Trends this week:</h3>\n"
-    trends_html += "<b>Field record:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
+    trends_html += "<b>Field this week:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
+    trends_html += "<b>Favorites record:</b> {}-{} ({:.1f}%)<br>\n".format(fav_wins, fav_losses, fav_pct)
+    trends_html += "<b>Underdogs record:</b> {}-{} ({:.1f}%)<br>\n".format(dog_wins, dog_losses, dog_pct)
     trends_html += "<b>Most picked win:</b> {}<br>\n".format(most_picked_win)
     trends_html += "<b>Most picked loss:</b> {}<br>\n".format(most_picked_loss)
     trends_html += "<b>Best pick:</b> {}<br>\n".format(best_pick_str)
@@ -558,7 +594,6 @@ def lambda_handler(event, context):
             # return error if all players do not receive email
             logger.info("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
             raise RuntimeError("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
-            # return response(504, 'text/html', build_html("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
