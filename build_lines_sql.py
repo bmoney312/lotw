@@ -136,10 +136,10 @@ def generate_sql_lines(conn, week):
         line = spreads_map.get((away_team_id, home_team_id), spreads_map.get(home_team_id))
         line_str = str(line) if line is not None else ""
 
-        # Format: UPDATE Games_YYYY SET home_team_line = -3 WHERE game_id = 123 AND home_team_id = 'DEN';
+        # Format: UPDATE Games_YYYY SET home_team_line = -3 WHERE game_id = 123 AND away_team_id = 'KC' AND home_team_id = 'DEN';
         sql_line = (
             f"UPDATE {table_name} SET home_team_line = {line_str} "
-            f"WHERE game_id = {game_id} AND home_team_id = '{home_team_id}';"
+            f"WHERE game_id = {game_id} AND away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}';"
         )
         sql_output += sql_line + "<br>"
 
