@@ -372,6 +372,57 @@ def lambda_handler(event, context):
                 player_picks_by_player[pid] = []
             player_picks_by_player[pid].append((p_week, p_pick, p_ats))
 
+    # --- Calculate Weekly Trends ---
+    field_wins = 0
+    pick_counts = {}
+    pick_ats_map = {}
+
+    for pid, pick_data in picks_map.items():
+        p_pick, p_line, p_ats, p_locked = pick_data
+        if p_pick != "NOP" and p_ats is not None:
+            pick_counts[p_pick] = pick_counts.get(p_pick, 0) + 1
+            pick_ats_map[p_pick] = p_ats
+            if p_ats > 0:
+                field_wins += 1
+
+    field_losses = total_players_season - field_wins
+    field_pct = (field_wins / total_players_season * 100) if total_players_season > 0 else 0.0
+
+    winning_picks = {team: count for team, count in pick_counts.items() if pick_ats_map[team] > 0}
+    losing_picks = {team: count for team, count in pick_counts.items() if pick_ats_map[team] <= 0}
+
+    def get_most_picked(picks_dict):
+        if not picks_dict:
+            return "-"
+        max_count = max(picks_dict.values())
+        top_teams = [team for team, count in picks_dict.items() if count == max_count]
+        return "{} ({} picks)".format(", ".join(top_teams), max_count)
+
+    most_picked_win = get_most_picked(winning_picks)
+    most_picked_loss = get_most_picked(losing_picks)
+
+    if pick_ats_map:
+        max_ats = max(pick_ats_map.values())
+        best_teams = [team for team, ats in pick_ats_map.items() if ats == max_ats]
+        best_ats_str = "+{}".format(max_ats) if max_ats > 0 else str(max_ats)
+        best_pick_str = "{} ({} ATS Points)".format(", ".join(best_teams), best_ats_str)
+
+        min_ats = min(pick_ats_map.values())
+        worst_teams = [team for team, ats in pick_ats_map.items() if ats == min_ats]
+        worst_ats_str = "+{}".format(min_ats) if min_ats > 0 else str(min_ats)
+        worst_pick_str = "{} ({} ATS Points)".format(", ".join(worst_teams), worst_ats_str)
+    else:
+        best_pick_str = "-"
+        worst_pick_str = "-"
+
+    trends_html = "<h3>Trends this week:</h3>\n"
+    trends_html += "<b>Field this week:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
+    trends_html += "<b>Most picked win:</b> {}<br>\n".format(most_picked_win)
+    trends_html += "<b>Most picked loss:</b> {}<br>\n".format(most_picked_loss)
+    trends_html += "<b>Best pick:</b> {}<br>\n".format(best_pick_str)
+    trends_html += "<b>Worst pick:</b> {}<br>\n".format(worst_pick_str)
+    # --- End Weekly Trends Calculation ---
+
     # initialize emails sent metric counter
     emails_sent_count = 0
 
@@ -397,9 +448,12 @@ def lambda_handler(event, context):
         # build message body
         message = "<br>"
 
+        # include trends report
+        message += trends_html
+
         # include pick report by default
         logger.info("Building pick report for player {}".format(player_id))
-        message = message + "<br><h3>Your picks:</h3>\n"
+        message += "<br><h3>Your picks:</h3>\n"
 
         # Get Current Season Details
         weekly_data, season_fav, season_dog, season_pickem = get_player_season_details_cached(
