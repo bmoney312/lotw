@@ -178,13 +178,14 @@ class TestEmailGeneration(unittest.TestCase):
         self.assertEqual(mock_smtp_send.call_count, 2) # Emailed 2 players
         mock_cloudwatch.put_metric_data.assert_called_once() # Assert the method was called on the object
 
+
     @patch('email_standings.cloudwatch')
     @patch('email_standings.get_db_connection')
     @patch('email_standings.smtp_connect')
     @patch('email_standings.smtp_send')
     @patch('email_standings.get_all_paid_players')
-    @patch('email_standings.get_standings_by_year')
-    @patch('email_standings.get_standings_message_by_year')
+    @patch('email_standings.get_standings')
+    @patch('email_standings.get_standings_message')
     def test_email_standings_scheduled_event(
         self,
         mock_standings_msg,
@@ -201,11 +202,14 @@ class TestEmailGeneration(unittest.TestCase):
         mock_cursor = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
 
-        # Mock cursor.fetchall() for the picks pre-fetch query:
-        # [(player_id, pick, line, pick_ats, locked_in)]
-        mock_cursor.fetchall.return_value = [
-            (1, "SEA", -3, 7, True),
-            (2, "DEN", 4, -5, True)
+        # Use side_effect to return different data for the 3 sequential fetchall() calls
+        mock_cursor.fetchall.side_effect = [
+            # Call 1: Picks map -> (player_id, pick, line, pick_ats, locked_in)
+            [(1, "SEA", -3, 7, True), (2, "DEN", 4, -5, True)],
+            # Call 2: Games -> (home_team_id, away_team_id, home_team_line, away_team_score, home_team_score, week)
+            [("SEA", "DEN", -3, 20, 10, 1)],
+            # Call 3: Player season picks -> (player_id, week, pick, pick_ats)
+            [(1, 1, "SEA", 7), (2, 1, "DEN", -5)]
         ]
 
         # 2. Setup SMTP mocks
