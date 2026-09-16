@@ -405,18 +405,18 @@ def lambda_handler(event, context):
         max_ats = max(pick_ats_map.values())
         best_teams = [team for team, ats in pick_ats_map.items() if ats == max_ats]
         best_ats_str = "+{}".format(max_ats) if max_ats > 0 else str(max_ats)
-        best_pick_str = "{} ({} ATS Points)".format(", ".join(best_teams), best_ats_str)
+        best_pick_str = "{} ({} ATS)".format(", ".join(best_teams), best_ats_str)
 
         min_ats = min(pick_ats_map.values())
         worst_teams = [team for team, ats in pick_ats_map.items() if ats == min_ats]
         worst_ats_str = "+{}".format(min_ats) if min_ats > 0 else str(min_ats)
-        worst_pick_str = "{} ({} ATS Points)".format(", ".join(worst_teams), worst_ats_str)
+        worst_pick_str = "{} ({} ATS)".format(", ".join(worst_teams), worst_ats_str)
     else:
         best_pick_str = "-"
         worst_pick_str = "-"
 
     trends_html = "<h3>Trends this week:</h3>\n"
-    trends_html += "<b>Field this week:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
+    trends_html += "<b>Field record:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
     trends_html += "<b>Most picked win:</b> {}<br>\n".format(most_picked_win)
     trends_html += "<b>Most picked loss:</b> {}<br>\n".format(most_picked_loss)
     trends_html += "<b>Best pick:</b> {}<br>\n".format(best_pick_str)
