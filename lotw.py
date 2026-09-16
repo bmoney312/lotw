@@ -965,13 +965,18 @@ def get_standings(conn):
     returns list of tuples of format:
     (player_id, last_name, first_name, past_titles, rookie (boolean), wins, losses, win_percentage, ats_points)
     """
-
+    current_year = get_current_year()
     with conn.cursor() as cur:
-        select_statement = "SELECT Standings_" + str(get_current_year()) + ".player_id, `last_name`, `first_name`, `past_titles`, `rookie`, `wins`, `losses`, `win_percentage`, `ats_points`, `streak` FROM Standings_" + str(get_current_year()) + " INNER JOIN Players ON Standings_" + str(get_current_year()) + ".player_id = Players.player_id ORDER BY win_percentage DESC, ats_points DESC, last_name ASC, first_name ASC"
-        logger.debug("get_standings(): {}".format(select_statement))
+        select_statement = f"""
+            SELECT s.player_id, p.last_name, p.first_name, p.past_titles, 
+                   p.rookie, s.wins, s.losses, s.win_percentage, s.ats_points, s.streak
+            FROM `Standings_{current_year}` s
+            INNER JOIN `Players` p ON s.player_id = p.player_id
+            WHERE p.`{current_year}_registration` = 1
+            ORDER BY s.win_percentage DESC, s.ats_points DESC, p.last_name ASC, p.first_name ASC
+        """
         cur.execute(select_statement)
-        rows = cur.fetchall()
-        return rows
+        return cur.fetchall()
 
 
 def get_standings_full_name(first_name, last_name, past_titles, rookie):

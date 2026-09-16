@@ -84,6 +84,50 @@ def update_standings_table(conn, week, year):
     """
     Update Standings table based on picks thru and including week provided.
     """
+
+    # Velocity check threshold
+    MAX_PRUNE_LIMIT = 5
+
+    # Prune players who are no longer registered with a velocity safety check
+    try:
+        with conn.cursor() as cur:
+            count_sql = (
+                "SELECT COUNT(*) FROM `Standings_{}` "
+                "WHERE player_id NOT IN ("
+                "SELECT player_id FROM Players WHERE `{}_registration` = 1"
+                ")"
+            ).format(year, year)
+            logger.debug("update_standings_table(): checking prune candidate count SQL: {}".format(count_sql))
+            cur.execute(count_sql)
+            prune_count = cur.fetchone()[0]
+
+            # Velocity check: abort if count exceeds threshold
+            if prune_count > MAX_PRUNE_LIMIT:
+                error_msg = (
+                    "Velocity check failed: {} players flagged for pruning in Standings_{}, "
+                    "which exceeds the safety limit of {}. Aborting standings update."
+                ).format(prune_count, year, MAX_PRUNE_LIMIT)
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            if prune_count > 0:
+                prune_sql = (
+                    "DELETE FROM `Standings_{}` "
+                    "WHERE player_id NOT IN ("
+                    "SELECT player_id FROM Players WHERE `{}_registration` = 1"
+                    ")"
+                ).format(year, year)
+                logger.debug("update_standings_table(): pruning unregistered players SQL: {}".format(prune_sql))
+                cur.execute(prune_sql)
+                conn.commit()
+                logger.info("Pruned {} unregistered player(s) from Standings_{}".format(prune_count, year))
+            else:
+                logger.debug("No unregistered players to prune from Standings_{}".format(year))
+
+    except Exception as e:
+        logger.error("Error during prune safety check / execution for Standings_{}: {}".format(year, str(e)))
+        raise
+
     all_players = get_all_current_players_by_year(conn, year)
 
     for player in all_players:
