@@ -450,9 +450,9 @@ def lambda_handler(event, context):
         worst_pick_str = "-"
 
     trends_html = "<h3>Trends this week:</h3>\n"
-    trends_html += "<b>Field this week:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
-    trends_html += "<b>Favorites record:</b> {}-{} ({:.1f}%)<br>\n".format(fav_wins, fav_losses, fav_pct)
-    trends_html += "<b>Underdogs record:</b> {}-{} ({:.1f}%)<br>\n".format(dog_wins, dog_losses, dog_pct)
+    trends_html += "<b>Field record:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
+    trends_html += "<b>Favorites:</b> {}-{} ({:.1f}%)<br>\n".format(fav_wins, fav_losses, fav_pct)
+    trends_html += "<b>Underdogs:</b> {}-{} ({:.1f}%)<br>\n".format(dog_wins, dog_losses, dog_pct)
     trends_html += "<b>Most picked win:</b> {}<br>\n".format(most_picked_win)
     trends_html += "<b>Most picked loss:</b> {}<br>\n".format(most_picked_loss)
     trends_html += "<b>Best pick:</b> {}<br>\n".format(best_pick_str)
