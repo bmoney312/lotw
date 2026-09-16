@@ -43,7 +43,7 @@ def get_button_html(week, player_id, pick, token):
        text-align: center;
        vertical-align: middle;
    ">
-     Confirm & Lock In Pick
+     Confirm Pick
    </span>
  </form>
  &nbsp;
