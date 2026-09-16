@@ -39,21 +39,23 @@ class TestAPIProcessing(unittest.TestCase):
 
     @patch('process_pick.get_db_connection')
     @patch('process_pick.validate_field')
+    @patch('process_pick.check_auth_token')
     @patch('process_pick.submit_pick')
     @patch('process_pick.send_email')
     @patch('process_pick.get_player_info')
-    def test_process_pick_success(self, mock_get_player_info, mock_send_email, mock_submit_pick, mock_validate, mock_db_conn):
+    def test_process_pick_success(self, mock_get_player_info, mock_send_email, mock_submit_pick, mock_check_auth, mock_validate, mock_db_conn):
         # 1. Setup Mocks
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
         mock_validate.return_value = True
+        mock_check_auth.return_value = (True, "authentication successful")
         mock_submit_pick.return_value = (True, "SEA", -3, "Your pick was updated successfully!")
         mock_get_player_info.return_value = ("test@example.com", "John", "Doe")
         mock_send_email.return_value = True
 
-        # 2. Define API Gateway Payload with valid human_click token
+        # 2. Define API Gateway Payload with human_click, interaction_proof, and token
         event = {
-            "body": "pick=SEA&week=1&player_id=123&user_action=human_click"
+            "body": "pick=SEA&week=1&player_id=123&user_action=human_click&interaction_proof=145_320&token=NbyqUIN8"
         }
 
         # 3. Execute Handler
@@ -62,6 +64,7 @@ class TestAPIProcessing(unittest.TestCase):
         # 4. Assertions
         self.assertEqual(response['statusCode'], 200)
         self.assertIn("Your pick was updated successfully!", response['body'])
+        mock_check_auth.assert_called_once_with(mock_conn, "NbyqUIN8", "123", "1")
         mock_submit_pick.assert_called_once()
         mock_send_email.assert_called_once()
 
@@ -70,7 +73,7 @@ class TestAPIProcessing(unittest.TestCase):
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
 
-        event = {} # Missing body
+        event = {}  # Missing body
         response = process_pick.lambda_handler(event, {})
 
         self.assertEqual(response['statusCode'], 400)
@@ -81,14 +84,59 @@ class TestAPIProcessing(unittest.TestCase):
         mock_conn = MagicMock()
         mock_db_conn.return_value = mock_conn
 
-        # Missing user_action token
+        # Missing user_action token and interaction proof
         event = {
-            "body": "pick=SEA&week=1&player_id=123"
+            "body": "pick=SEA&week=1&player_id=123&token=NbyqUIN8"
         }
         response = process_pick.lambda_handler(event, {})
 
         self.assertEqual(response['statusCode'], 400)
         self.assertIn("Invalid submission", response['body'])
+
+    @patch('process_pick.get_db_connection')
+    def test_process_pick_rejects_missing_interaction_proof(self, mock_db_conn):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
+        # Has user_action, but missing coordinate proof
+        event = {
+            "body": "pick=SEA&week=1&player_id=123&user_action=human_click&token=NbyqUIN8"
+        }
+        response = process_pick.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 400)
+        self.assertIn("Invalid submission", response['body'])
+
+    @patch('process_pick.get_db_connection')
+    def test_process_pick_rejects_missing_token(self, mock_db_conn):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
+        # Valid interaction proof but omitted auth token
+        event = {
+            "body": "pick=SEA&week=1&player_id=123&user_action=human_click&interaction_proof=145_320"
+        }
+        response = process_pick.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 400)
+        self.assertIn("Invalid session token", response['body'])
+
+    @patch('process_pick.get_db_connection')
+    @patch('process_pick.validate_field')
+    @patch('process_pick.check_auth_token')
+    def test_process_pick_rejects_unauthorized_token(self, mock_check_auth, mock_validate, mock_db_conn):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+        mock_validate.return_value = True
+        mock_check_auth.return_value = (False, "invalid token")
+
+        event = {
+            "body": "pick=SEA&week=1&player_id=123&user_action=human_click&interaction_proof=145_320&token=BADTOKEN"
+        }
+        response = process_pick.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 400)
+        self.assertIn("Unauthorized submission", response['body'])
 
 
 class TestEmailGeneration(unittest.TestCase):

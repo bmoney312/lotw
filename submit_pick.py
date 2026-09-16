@@ -13,20 +13,38 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def get_button_html(week, player_id, pick):
+def get_button_html(week, player_id, pick, token):
     """
-    Generate submit and cancel buttons requiring explicit user click
-    to assemble and submit the form.
+    Generate an unstyled custom interactive element that avoids standard
+    <button> heuristics and verifies real human pointer coordinates.
     """
     html = """
  <form id="pickForm" method="post" action="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/picks" class="inline">
    <input type="hidden" name="week" value="{}">
    <input type="hidden" name="player_id" value="{}">
    <input type="hidden" name="pick" value="{}">
+   <input type="hidden" name="token" value="{}">
    <input type="hidden" id="user_action" name="user_action" value="">
-   <button type="button" id="submitBtn" class="btn btn-primary" onclick="confirmAndSubmit()">
-     SUBMIT PICK
-   </button>
+   <input type="hidden" id="interaction_proof" name="interaction_proof" value="">
+
+   <span id="customSubmitAction" style="
+       display: inline-block;
+       padding: 6px 14px;
+       background-color: #337ab7;
+       color: #ffffff;
+       border: 1px solid #2e6da4;
+       border-radius: 4px;
+       cursor: pointer;
+       user-select: none;
+       font-family: inherit;
+       font-size: 14px;
+       font-weight: 500;
+       line-height: 1.42857143;
+       text-align: center;
+       vertical-align: middle;
+   ">
+     Confirm & Lock In Pick
+   </span>
  </form>
  &nbsp;
  <form action="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit" class="inline">
@@ -36,15 +54,26 @@ def get_button_html(week, player_id, pick):
  </form>
 
  <script>
-   function confirmAndSubmit() {{
-     // Populate verification field indicating a human clicked the button
+   const actionEl = document.getElementById('customSubmitAction');
+
+   actionEl.addEventListener('pointerup', function(e) {{
+     // 1. Block synthetic script dispatch (isTrusted is false for programmatic events)
+     if (!e.isTrusted) return;
+
+     // 2. Reject headless runners reporting zeroed/empty coordinates
+     if (e.clientX === 0 && e.clientY === 0 && e.screenX === 0) return;
+
+     // 3. Set payload proof
      document.getElementById('user_action').value = 'human_click';
-     document.getElementById('submitBtn').disabled = true;
-     document.getElementById('submitBtn').innerText = 'Submitting...';
+     document.getElementById('interaction_proof').value = Math.round(e.clientX) + '_' + Math.round(e.clientY);
+
+     actionEl.innerText = 'Submitting...';
+     actionEl.style.pointerEvents = 'none';
+
      document.getElementById('pickForm').submit();
-   }}
+   }});
  </script>
-""".format(week, player_id, pick)
+""".format(week, player_id, pick, token)
 
     return html
 
@@ -92,21 +121,26 @@ def lambda_handler(event, context):
 
     if pick is not None:
         if pick == "XXX":
+            conn.close()
             return response(200, 'text/html', build_html("Pick change cancelled"))
 
     # validate pick is valid team
     if not validate_field(conn, pick, 'team_id', 'Teams'):
+        conn.close()
         return response(400, 'text/html', build_html("invalid team {}".format(pick)))
 
     if not validate_field(conn, player_id, 'player_id', 'Players'):
+        conn.close()
         return response(400, 'text/html', build_html("invalid player {}".format(player_id)))
 
     if not validate_field(conn, week, 'week', "Games_" + str(get_current_year())):
+        conn.close()
         return response(400, 'text/html', build_html("invalid week {}".format(week)))
 
     if token is None:
         message = "invalid token"
         logger.info("Player {} - {}".format(player_id, message))
+        conn.close()
         return response(400, 'text/html', build_html(message))
 
     # check auth token
@@ -114,6 +148,7 @@ def lambda_handler(event, context):
 
     if not authenticated:
         logger.info("Player {} - {}".format(player_id, message))
+        conn.close()
         return response(400, 'text/html', build_html(message))
 
     # get player data
@@ -129,9 +164,10 @@ def lambda_handler(event, context):
         logger.info("pick change to {} denied for player {}, current pick {} is locked in".format(pick, player_id, current_pick))
         message += "your week {} pick is locked in and cannot be changed.</h5>".format(week)
         html = build_html_head() + message + "</span></body></html>"
+        conn.close()
         return response(200, 'text/html', html)
 
-    # confirm pick is still avaiable
+    # confirm pick is still available
     time_now = datetime.datetime.now()
     kickoff_time = get_kickoff_time(conn, pick, week)
 
@@ -139,6 +175,7 @@ def lambda_handler(event, context):
         logger.info("{} is off the board for week {}. Kickoff time has passed {}".format(pick, week, datetime_to_string(kickoff_time)))
         message += "{} is off the board for week {}. Kickoff time has passed ({}).</h5>".format(pick, week, datetime_to_string(kickoff_time))
         html = build_html_head() + message + "</span></body></html>"
+        conn.close()
         return response(200, 'text/html', html)
 
     # confirm game has valid line (line must be posted, not null)
@@ -146,22 +183,21 @@ def lambda_handler(event, context):
         logger.info("{} is off the board currently for week {}. Please select a different team.".format(pick, week))
         message += "{} is off the board currently for week {}. Please select a different team.</h5>".format(pick, week)
         html = build_html_head() + message + "</span></body></html>"
+        conn.close()
         return response(200, 'text/html', html)
 
     if current_pick == "NOP" or current_pick is None:
         logger.info("confirm new pick {} for player {}".format(pick, player_id))
         message += "please confirm your week {} pick <b>{} {}</b></h5>".format(week, pick, formatted_line(line))
-        message += get_button_html(week, player_id, pick)
+        message += get_button_html(week, player_id, pick, token)
     else:
-        # printable_line = formatted_line(current_line)
-        # message += "your week {} pick is <b>{} {}</b>. ".format(week, current_pick, printable_line)
         if pick == current_pick:
             logger.info("confirm pick {} for player {} no change from {}".format(pick, player_id, current_pick))
             message += "please confirm your week {} pick <b>{} {}</b></h5>".format(week, pick, formatted_line(line))
         else:
             logger.info("confirm pick change to {} for player {} changed from {}".format(pick, player_id, current_pick))
             message += "please confirm your pick change to <b>{} {}</b></h5>".format(pick, formatted_line(line))
-        message += get_button_html(week, player_id, pick)
+        message += get_button_html(week, player_id, pick, token)
 
     html = build_html_head() + message + "</span></body></html>"
 

@@ -3,7 +3,7 @@ import sys
 import json
 import logging
 import datetime
-from lotw import validate_field, validate_key, get_player_info
+from lotw import validate_field, validate_key, get_player_info, check_auth_token
 from lotw import get_current_pick, get_kickoff_time, get_line, get_current_year
 from lotw import build_html_message, build_html_response, send_email
 from lotw import formatted_line, response, is_automated_scanner, get_db_connection
@@ -40,7 +40,7 @@ def submit_pick(conn, player_id, pick, week):
         logger.info("Player {} - {}".format(player_id, message))
         return (False, current_pick, current_line, message)
 
-    # confirm pick is still avaiable
+    # confirm pick is still available
     time_now = datetime.datetime.now()
     kickoff_time = get_kickoff_time(conn, pick, week)
     logger.debug("submit_pick(): kickoff time for {} week {} is {}".format(pick, week, kickoff_time))
@@ -107,6 +107,7 @@ def lambda_handler(event, context):
     # validate input
     if not validate_key(event, 'body'):
         logger.error("HTTP/400 Bad Request [body]")
+        conn.close()
         return response(400, 'text/html', build_html_response("Bad Request [body]"))
 
     # read body of request
@@ -114,49 +115,69 @@ def lambda_handler(event, context):
     tokens = input_body.split('&')
     params = {}
     for t in tokens:
-        (key, value) = t.split('=')
-        params[key] = value
+        parts = t.split('=', 1)
+        if len(parts) == 2:
+            params[parts[0]] = parts[1]
 
     logger.debug("validating params: {}".format(params))
 
-    # Check for human interaction token
+    # Check for human interaction token and coordinate proof
     user_action = params.get('user_action')
-    if user_action != 'human_click':
-        logger.error("HTTP/400 Rejecting automated/bot submission without valid user_action token: {}".format(user_action))
+    interaction_proof = params.get('interaction_proof', '')
+
+    if user_action != 'human_click' or '_' not in interaction_proof:
+        logger.error("HTTP/400 Rejecting automated submission: action={}, proof={}".format(user_action, interaction_proof))
+        conn.close()
         return response(400, 'text/html', build_html_response("Invalid submission. Please click the button to submit."))
 
     # check input parameters
     if not validate_key(params, 'pick'):
         logger.error("HTTP/400 Bad Request [pick]")
+        conn.close()
         return response(400, 'text/html', build_html_response("Bad Request [pick]"))
-    else:
-        pick = params['pick']
+    pick = params['pick']
 
     if not validate_key(params, 'week'):
         logger.error("HTTP/400 Bad Request [week]")
+        conn.close()
         return response(400, 'text/html', build_html_response("Bad Request [week]"))
-    else:
-        week = params['week']
+    week = params['week']
 
     if not validate_key(params, 'player_id'):
         logger.error("HTTP/400 Bad Request [player_id]")
+        conn.close()
         return response(400, 'text/html', build_html_response("Bad Request [player_id]"))
-    else:
-        player_id = params['player_id']
+    player_id = params['player_id']
+
+    # Validate auth token
+    token = params.get('token')
+    if not token:
+        logger.error("HTTP/400 Missing token in POST body for player_id {}".format(player_id))
+        conn.close()
+        return response(400, 'text/html', build_html_response("Invalid session token."))
+
+    authenticated, auth_msg = check_auth_token(conn, token, player_id, week)
+    if not authenticated:
+        logger.error("HTTP/400 Token validation failed for player_id {}: {}".format(player_id, auth_msg))
+        conn.close()
+        return response(400, 'text/html', build_html_response("Unauthorized submission."))
 
     logger.debug("validating input fields")
 
     # validate pick is valid team
     if not validate_field(conn, pick, "team_id", "Teams"):
         logger.error("HTTP/400 Bad Request: pick {}".format(pick))
+        conn.close()
         return response(400, 'text/html', build_html_response("invalid team {}".format(pick)))
 
     if not validate_field(conn, player_id, 'player_id', 'Players'):
         logger.error("HTTP/400 Bad Request: player_id {}".format(player_id))
+        conn.close()
         return response(400, 'text/html', build_html_response("invalid player {}".format(player_id)))
 
     if not validate_field(conn, week, 'week', "Games_" + str(get_current_year())):
         logger.error("HTTP/400 Bad Request: week {}".format(week))
+        conn.close()
         return response(400, 'text/html', build_html_response("invalid week {}".format(week)))
 
     logger.debug("calling submit_pick()")
@@ -165,7 +186,6 @@ def lambda_handler(event, context):
     # send email to confirm picks that were recorded successfully
     if res is True:
         logger.info("Sending email to player_id {}".format(player_id))
-        # initialize variables
         mail_username = os.environ['mail_username']
         mail_password = os.environ['mail_password']
         mail_host = os.environ['mail_host']
