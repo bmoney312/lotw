@@ -169,8 +169,14 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
                 game_result = "{} {} v {} {}".format(away_team_id, away_score, home_team_id, home_score)
 
         pick_display = "{} {}".format(pick, formatted_line(line)) if line is not None else pick
+
         if pick_ats is not None:
-            result_str = "Win" if pick_ats > 0 else ("Loss" if pick_ats < 0 else "Loss (Push)")
+            if pick_ats > 0:
+                result_str = "Win (+{} ATS)".format(pick_ats)
+            elif pick_ats < 0:
+                result_str = "Loss ({} ATS)".format(pick_ats)
+            else:
+                result_str = "Loss (Push) (0 ATS)"
         else:
             result_str = "-"
 
@@ -180,6 +186,7 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
             'game_result': game_result,
             'site': site,
             'result': result_str,
+            'pick_ats': pick_ats,
             'type': classification
         })
 
@@ -425,7 +432,11 @@ def lambda_handler(event, context):
         # Updated table headers and row to include Game Result
         message += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Site</th><th>Type</th><th>Result</th></tr>"
         for row in weekly_data:
-            res_class = "win" if row['result'] == "Win" else ("loss" if (row['result'] == "Loss" or row['result'] == "Loss (Push)") else "")
+            if row['pick_ats'] is not None:
+                res_class = "win" if row['pick_ats'] > 0 else "loss"
+            else:
+                res_class = ""
+
             message += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
                 row['week'], row['pick'], row['game_result'], row['site'], row['type'], res_class, row['result']
             )
