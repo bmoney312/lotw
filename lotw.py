@@ -968,7 +968,7 @@ def get_standings(conn):
     current_year = get_current_year()
     with conn.cursor() as cur:
         select_statement = f"""
-            SELECT s.player_id, p.last_name, p.first_name, p.past_titles, 
+            SELECT s.player_id, p.last_name, p.first_name, p.past_titles,
                    p.rookie, s.wins, s.losses, s.win_percentage, s.ats_points, s.streak
             FROM `Standings_{current_year}` s
             INNER JOIN `Players` p ON s.player_id = p.player_id
