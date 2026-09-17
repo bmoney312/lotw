@@ -299,7 +299,10 @@ def lambda_handler(event, context):
             emit_emails_sent_metric(week, emails_sent_count)
             conn.close()
             raise RuntimeError("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
+        else:
+            logger.info("Lines for week {} sent successfully to player {} {}.".format(week, player_id, player_email))
 
+        # gentle pacing
         sleep(2)
 
     emit_emails_sent_metric(week, emails_sent_count)
