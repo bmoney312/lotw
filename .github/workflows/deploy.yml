@@ -26,6 +26,7 @@ env:
     email_standings
     email_payment_reminder
     emit_lotw_metrics
+    lambda_warmer
     process_pick
     process_registration
     submit_pick

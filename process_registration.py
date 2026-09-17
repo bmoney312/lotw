@@ -46,6 +46,10 @@ def lambda_handler(event, context):
     Process LOTW sign up reqeusts
     """
 
+    # Intercept warmer ping immediately
+    if event.get('warmer') is True or event.get('detail-type') == 'Scheduled Warmer':
+        return response(200, 'text/plain', 'warm')
+
     logger.info("Received event: " + json.dumps(event, indent=2))
 
     # create lotw database connection

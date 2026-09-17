@@ -85,6 +85,10 @@ def lambda_handler(event, context):
     Process HTTP GET requests to display pick submission confirmation page
     """
 
+    # Intercept warmer ping immediately
+    if event.get('warmer') is True or event.get('detail-type') == 'Scheduled Warmer':
+        return response(200, 'text/plain', 'warm')
+
     logger.info("Received event: " + json.dumps(event, indent=2))
 
     # check for prefetch scanners
