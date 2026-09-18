@@ -193,25 +193,43 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
     return weekly_data, fav_count, dog_count, pickem_count
 
 
-def emit_emails_sent_metric(week, emails_sent_count):
+def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
     # Emit the metric emails_sent_count
     retval = False
+    metric_data = [
+        {
+            'MetricName': 'StandingsEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        }
+    ]
+
+    # Also emit ScheduledStandingsEmailsSent when triggered by an EventBridge scheduled event
+    if request_type == "Scheduled Event":
+        metric_data.append({
+            'MetricName': 'ScheduledStandingsEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        })
+
     try:
         cloudwatch.put_metric_data(
             Namespace='lotw',
-            MetricData=[
-                {
-                    'MetricName': 'StandingsEmailsSent',
-                    'Dimensions': [
-                        {'Name': 'Year', 'Value': str(get_current_year())},
-                        {'Name': 'Week', 'Value': str(week)}
-                    ],
-                    'Value': emails_sent_count,
-                    'Unit': 'Count'
-                },
-            ]
+            MetricData=metric_data
         )
-        logger.info("Emitted StandingsEmailsSent metric: {}".format(emails_sent_count))
+        logger.info(
+            "Emitted metric(s) for count %s (scheduled=%s)",
+            emails_sent_count,
+            request_type == "Scheduled Event"
+        )
         retval = True
     except Exception as e:
         logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
@@ -586,7 +604,7 @@ def lambda_handler(event, context):
                 smtp_relay.close()
 
             # email emails sent metric
-            emit_emails_sent_metric(standings_week, emails_sent_count)
+            emit_emails_sent_metric(standings_week, emails_sent_count, request_type)
 
             # close database connection
             conn.close()
@@ -599,7 +617,7 @@ def lambda_handler(event, context):
         sleep(2)
 
     # emit emails sent metric
-    emit_emails_sent_metric(standings_week, emails_sent_count)
+    emit_emails_sent_metric(standings_week, emails_sent_count, request_type)
 
     # close database connection
     conn.close()
