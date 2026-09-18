@@ -107,27 +107,45 @@ def build_lines_email_body(player_id, week, token, games_list, team_names_map):
     return html
 
 
-def emit_emails_sent_metric(week, emails_sent_count):
+def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
     retval = False
+    metric_data = [
+        {
+            'MetricName': 'LinesEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        }
+    ]
+
+    # Also emit ScheduledLinesEmailsSent when triggered by an EventBridge scheduled event
+    if request_type == "Scheduled Event":
+        metric_data.append({
+            'MetricName': 'ScheduledLinesEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        })
+
     try:
         cloudwatch.put_metric_data(
             Namespace='lotw',
-            MetricData=[
-                {
-                    'MetricName': 'LinesEmailsSent',
-                    'Dimensions': [
-                        {'Name': 'Year', 'Value': str(get_current_year())},
-                        {'Name': 'Week', 'Value': str(week)}
-                    ],
-                    'Value': emails_sent_count,
-                    'Unit': 'Count'
-                },
-            ]
+            MetricData=metric_data
         )
-        logger.info("Emitted LinesEmailsSent metric: {}".format(emails_sent_count))
+        logger.info(
+            "Emitted metric(s) for count %s (scheduled=%s)",
+            emails_sent_count,
+            request_type == "Scheduled Event"
+        )
         retval = True
     except Exception as e:
-        logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
+        logger.error("Failed to emit CloudWatch metric: %s", str(e))
     return retval
 
 
@@ -296,7 +314,7 @@ def lambda_handler(event, context):
         if not email_sent_successfully:
             if smtp_relay is not None:
                 smtp_relay.close()
-            emit_emails_sent_metric(week, emails_sent_count)
+            emit_emails_sent_metric(week, emails_sent_count, request_type)
             conn.close()
             raise RuntimeError("Lines for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
         else:
@@ -305,7 +323,7 @@ def lambda_handler(event, context):
         # gentle pacing
         sleep(2)
 
-    emit_emails_sent_metric(week, emails_sent_count)
+    emit_emails_sent_metric(week, emails_sent_count, request_type)
     conn.close()
     smtp_relay.close()
     logger.info("Lines for week {} sent successfully to {} players.".format(week, emails_sent_count))
