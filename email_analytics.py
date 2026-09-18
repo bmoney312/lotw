@@ -435,25 +435,43 @@ def build_analytics_html(
     return html
 
 
-def emit_emails_sent_metric(week, emails_sent_count):
+def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
     # Emit the metric emails_sent_count
     retval = False
+    metric_data = [
+        {
+            'MetricName': 'AnalyticsEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        }
+    ]
+
+    # Also emit ScheduledAnalyticsEmailsSent when triggered by an EventBridge scheduled event
+    if request_type == "Scheduled Event":
+        metric_data.append({
+            'MetricName': 'ScheduledAnalyticsEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        })
+
     try:
         cloudwatch.put_metric_data(
             Namespace='lotw',
-            MetricData=[
-                {
-                    'MetricName': 'AnalyticsEmailsSent',
-                    'Dimensions': [
-                        {'Name': 'Year', 'Value': str(get_current_year())},
-                        {'Name': 'Week', 'Value': str(week)}
-                    ],
-                    'Value': emails_sent_count,
-                    'Unit': 'Count'
-                },
-            ]
+            MetricData=metric_data
         )
-        logger.info("Emitted AnalyticsEmailsSent metric: {}".format(emails_sent_count))
+        logger.info(
+            "Emitted metric(s) for count %s (scheduled=%s)",
+            emails_sent_count,
+            request_type == "Scheduled Event"
+        )
         retval = True
     except Exception as e:
         logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
@@ -648,7 +666,7 @@ def lambda_handler(event, context):
                 smtp_relay.close()
 
             # emit emails sent metric
-            emit_emails_sent_metric(current_week, emails_sent_count)
+            emit_emails_sent_metric(current_week, emails_sent_count, request_type)
 
             # close database connection
             conn.close()
@@ -656,13 +674,12 @@ def lambda_handler(event, context):
             # return error if all players do not receive email
             logger.info("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES))
             raise RuntimeError("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES))
-            # return response(504, 'text/html', build_html("Analytics Report send failed for player {} after {} attempts. Aborting.".format(p_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
 
     # emit emails sent metric
-    emit_emails_sent_metric(current_week, emails_sent_count)
+    emit_emails_sent_metric(current_week, emails_sent_count, request_type)
 
     smtp_relay.close()
     conn.close()
