@@ -153,7 +153,6 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
     rank = 1
     for row in standings:
         (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
-        # ... (full_name and highlight logic) ...
         full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
 
         # highlight player's own pick
@@ -190,8 +189,6 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
 
         html += build_picks_html_row(rank_as_string, full_name, wins, losses, ats_points, streak, pick_as_string, highlight_row)
         rank += 1
-
-    # end for
 
     html = html + "</table>"
     html = html + "<br><br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
@@ -242,25 +239,43 @@ def get_picks_at_kickoff_time(conn, week, lock_in_time, send_pick_summary):
         return picks
 
 
-def emit_emails_sent_metric(week, emails_sent_count):
+def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
     # Emit the metric emails_sent_count
     retval = False
+    metric_data = [
+        {
+            'MetricName': 'PicksEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        }
+    ]
+
+    # Also emit ScheduledPicksEmailsSent when triggered by an EventBridge scheduled event
+    if request_type == "Scheduled Event":
+        metric_data.append({
+            'MetricName': 'ScheduledPicksEmailsSent',
+            'Dimensions': [
+                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Week', 'Value': str(week)}
+            ],
+            'Value': emails_sent_count,
+            'Unit': 'Count'
+        })
+
     try:
         cloudwatch.put_metric_data(
             Namespace='lotw',
-            MetricData=[
-                {
-                    'MetricName': 'PicksEmailsSent',
-                    'Dimensions': [
-                        {'Name': 'Year', 'Value': str(get_current_year())},
-                        {'Name': 'Week', 'Value': str(week)}
-                    ],
-                    'Value': emails_sent_count,
-                    'Unit': 'Count'
-                },
-            ]
+            MetricData=metric_data
         )
-        logger.info("Emitted EmailsSent metric: {}".format(emails_sent_count))
+        logger.info(
+            "Emitted metric(s) for count %s (scheduled=%s)",
+            emails_sent_count,
+            request_type == "Scheduled Event"
+        )
         retval = True
     except Exception as e:
         logger.error("Failed to emit CloudWatch metric: {}".format(str(e)))
@@ -343,11 +358,8 @@ def lambda_handler(event, context):
     raw_time = datetime.datetime.now()
     adjusted_minute = raw_time.minute - (raw_time.minute % 5)
     time_now = raw_time.replace(minute=adjusted_minute, second=0, microsecond=0)
-    # time_now = datetime.datetime.now().replace(minute=15, second=0, microsecond=0)
 
     # set pick deadline to current time
-    # scheduled events should align with game times to the minute
-    # pick summaries should be sent upon manual runs or no games will be returned
     pick_deadline = time_now
 
     logger.info("Current week set to {}".format(week))
@@ -402,7 +414,7 @@ def lambda_handler(event, context):
     # exit gracefully if there are no picks to send
     if len(player_picks) == 0:
         conn.close()
-        emit_emails_sent_metric(week, emails_sent_count)
+        emit_emails_sent_metric(week, emails_sent_count, request_type)
         logger.info("No picks found that locked in at {}. Exiting. [200]".format(pick_deadline))
         return response(200, 'text/html', build_html("No picks found that locked in at {}".format(pick_deadline)))
 
@@ -419,7 +431,6 @@ def lambda_handler(event, context):
         logger.info("Working on player {} {} {} {}".format(player_id, first_name, last_name, player_email))
 
         # skip players less than start_with_player_id
-        # if start_with_player_id provided
         if start_with_player_id is not None and request_type != "test":
             if player_id < start_with_player_id:
                 logger.info("Skipping player {} which is less than start_with_player_id {}".format(player_id, start_with_player_id))
@@ -483,16 +494,15 @@ def lambda_handler(event, context):
             conn.close()
 
             # return error if all players do not receive email
-            emit_emails_sent_metric(week, emails_sent_count)
+            emit_emails_sent_metric(week, emails_sent_count, request_type)
             logger.info("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
             raise RuntimeError("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES))
-            # return response(504, 'text/html', build_html("Picks for week {} send failed for player {} after {} attempts. Aborting.".format(week, player_id, MAX_RETRIES)))
 
         # Gentle pacing
         sleep(2)
 
     # Emit the metric emails_sent_count
-    emit_emails_sent_metric(week, emails_sent_count)
+    emit_emails_sent_metric(week, emails_sent_count, request_type)
 
     # close database connection
     conn.close()
