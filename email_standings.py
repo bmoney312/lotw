@@ -17,7 +17,7 @@ cloudwatch = boto3.client('cloudwatch')
 
 def build_standings_email_head():
     """
-    Build email head with centered layout and card container styling.
+    Build email head with left-justified header and centered card container styling.
     """
     html = """
 <html>
@@ -34,7 +34,7 @@ def build_standings_email_head():
              font-family: "Arial", "Helvetica", sans-serif;
          }
          h3 {
-             text-align: center;
+             text-align: left;
              margin-top: 10px;
              margin-bottom: 20px;
          }
@@ -71,17 +71,18 @@ def build_standings_email_head():
 
 def get_standings_html(week, standings, current_player_id, picks_map):
     """
-    Return string of LOTW standings in centered HTML table
+    Return string of LOTW standings in centered HTML table with left-justified header
     """
-    html = "<br><br><h3>LOTW: WEEK {} STANDINGS</h3>\n".format(week)
     if week == 19:
-        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n".format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n'.format(week)
     elif week == 20:
-        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n".format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n'.format(week)
     elif week == 21:
-        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n".format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n'.format(week)
     elif week == 22:
-        html = "<br><br><h3>LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n".format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n'.format(week)
+    else:
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS</h3>\n'.format(week)
 
     html += """
 <table class="email-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
@@ -514,7 +515,7 @@ def lambda_handler(event, context):
         best_pick_str = "-"
         worst_pick_str = "-"
 
-    trends_html = "<h3>Trends this week:</h3>\n"
+    trends_html = '<h3 style="text-align: left;">Trends this week:</h3>\n'
     trends_html += "<b>Field record:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
     trends_html += "<b>Favorites:</b> {}-{} ({:.1f}%)<br>\n".format(fav_wins, fav_losses, fav_pct)
     trends_html += "<b>Underdogs:</b> {}-{} ({:.1f}%)<br>\n".format(dog_wins, dog_losses, dog_pct)
@@ -553,7 +554,7 @@ def lambda_handler(event, context):
         message += trends_html
 
         logger.info("Building pick report for player {}".format(player_id))
-        message += "<br><h3>Your picks:</h3>\n"
+        message += '<br><h3 style="text-align: left;">Your picks:</h3>\n'
 
         weekly_data, season_fav, season_dog, season_pickem = get_player_season_details_cached(
             player_id, player_picks_by_player, games_by_week_team
