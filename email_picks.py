@@ -67,7 +67,7 @@ def build_picks_html_row(rank, full_name, wins, losses, ats_points, streak, pick
 
 def build_picks_email_head():
     """
-    Build picks email head with centered layout styles.
+    Build picks email head with left-justified header and centered card container layout styles.
     """
     html = """
 <html>
@@ -84,7 +84,7 @@ def build_picks_email_head():
              font-family: "Arial", "Helvetica", sans-serif;
          }
          h4 {
-             text-align: center;
+             text-align: left;
              margin-top: 10px;
              margin-bottom: 20px;
          }
@@ -134,15 +134,15 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
 
     # adjust header for playoff rounds
     if week == 19:
-        html += "<h4>LOTW: WEEK {} PICKS (WILDCARD WEEKEND)</h4>\n".format(week)
+        html += '<h4 style="text-align: left;">LOTW: WEEK {} PICKS (WILDCARD WEEKEND)</h4>\n'.format(week)
     elif week == 20:
-        html += "<h4>LOTW: WEEK {} PICKS (DIVISIONAL PLAYOFFS)</h4>\n".format(week)
+        html += '<h4 style="text-align: left;">LOTW: WEEK {} PICKS (DIVISIONAL PLAYOFFS)</h4>\n'.format(week)
     elif week == 21:
-        html += "<h4>LOTW: WEEK {} PICKS (CONFERENCE CHAMPIONSHIPS)</h4>\n".format(week)
+        html += '<h4 style="text-align: left;">LOTW: WEEK {} PICKS (CONFERENCE CHAMPIONSHIPS)</h4>\n'.format(week)
     elif week == 22:
-        html += "<h4>LOTW: WEEK {} PICKS (SUPER BOWL)</h4>\n".format(week)
+        html += '<h4 style="text-align: left;">LOTW: WEEK {} PICKS (SUPER BOWL)</h4>\n'.format(week)
     else:
-        html += "<h4>LOTW: WEEK {} PICKS</h4>\n".format(week)
+        html += '<h4 style="text-align: left;">LOTW: WEEK {} PICKS</h4>\n'.format(week)
 
     html += """
 <table class="picks-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
