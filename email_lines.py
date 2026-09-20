@@ -71,7 +71,7 @@ def build_lines_email_head():
              font-family: "Arial", "Helvetica", sans-serif;
          }
          h3 {
-             text-align: center;
+             text-align: left;
              margin-top: 10px;
              margin-bottom: 20px;
          }
@@ -122,7 +122,7 @@ def build_lines_email_body(player_id, week, token, games_list, team_names_map):
     elif week == 22:
         header_title = "LOTW: SUPER BOWL LINE"
 
-    html = "<h3>{}</h3>\n".format(header_title)
+    html = '<h3 style="text-align: left;">{}</h3>\n'.format(header_title)
 
     html += """
 <table class="lines-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
