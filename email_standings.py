@@ -7,7 +7,7 @@ import boto3
 from time import sleep
 from lotw import get_all_paid_players, get_player, get_standings, get_standings_full_name
 from lotw import get_current_week, get_standings_message, get_current_year, get_db_connection
-from lotw import build_html, formatted_line, response, build_html_head, smtp_send, smtp_connect
+from lotw import build_html, formatted_line, response, smtp_send, smtp_connect
 
 # global variables
 logger = logging.getLogger()
@@ -15,12 +15,65 @@ logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
 
+def build_standings_email_head():
+    """
+    Build email head with centered layout and card container styling.
+    """
+    html = """
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <style>
+         body {
+             margin: 0;
+             padding: 0;
+             width: 100% !important;
+             background-color: #f6f6f6;
+             font-family: "Arial", "Helvetica", sans-serif;
+         }
+         h3 {
+             text-align: center;
+             margin-top: 10px;
+             margin-bottom: 20px;
+         }
+         table.email-table {
+             width: 100%;
+             max-width: 650px;
+             margin: 0 auto;
+             border-collapse: collapse;
+             border: 1px solid black;
+         }
+         table.email-table th {
+             border: 1px solid black;
+             padding: 6px;
+             text-align: left;
+             background-color: lightgrey;
+         }
+         table.email-table td {
+             border: 1px solid black;
+             padding: 6px;
+             text-align: left;
+         }
+         .win { color: green; font-weight: bold; }
+         .loss { color: red; }
+         .footer-logo {
+             text-align: center;
+             margin-top: 25px;
+             margin-bottom: 15px;
+         }
+    </style>
+</head>
+"""
+    return html
+
+
 def get_standings_html(week, standings, current_player_id, picks_map):
     """
-    Return string of LOTW standings in HTML table
+    Return string of LOTW standings in centered HTML table
     """
-    html = "<br><br><h3>LOTW: WEEK {} STANDINGS</h3>".format(week)
-    # adjust header for playoff rounds
+    html = "<br><br><h3>LOTW: WEEK {} STANDINGS</h3>\n".format(week)
     if week == 19:
         html = "<br><br><h3>LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n".format(week)
     elif week == 20:
@@ -31,17 +84,17 @@ def get_standings_html(week, standings, current_player_id, picks_map):
         html = "<br><br><h3>LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n".format(week)
 
     html += """
-<table>
+<table class="email-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
 <tr>
-    <th>Rank</th>
-    <th>Name</th>
-    <th>Wins</th>
-    <th>Losses</th>
-    <th>Win %</th>
-    <th>ATS Points</th>
-    <th>Streak</th>
-    <th>Week {} Pick</th>
-    <th>Week {} Result</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Rank</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Name</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Wins</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Losses</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Win %</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">ATS Points</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Streak</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {} Pick</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {} Result</th>
 </tr>
 """.format(week, week)
 
@@ -52,12 +105,10 @@ def get_standings_html(week, standings, current_player_id, picks_map):
         pick_data = picks_map.get(player_id, ("NOP", None, None, False))
         (pick, line, pick_ats, locked_in) = pick_data
 
-        # highlight row of current player
         highlight_row = False
         if player_id == current_player_id:
             highlight_row = True
 
-        # set pick_ats for no picks
         if pick == "NOP" and pick_ats is None:
             pick_ats = 0
             locked_in = True
@@ -88,42 +139,55 @@ def get_standings_html(week, standings, current_player_id, picks_map):
         html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, streak, pick_as_string, result, highlight_row)
         rank += 1
 
-        # end for
     html += "</table>"
-    html = html + "<br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
+    html += """
+<div class="footer-logo" style="text-align: center; margin-top: 25px;">
+  <a href="https://aws.amazon.com/what-is-cloud-computing">
+    <img src="https://d0.awsstatic.com/logos/powered-by-aws.png" alt="Powered by AWS Cloud Computing" style="display: inline-block;">
+  </a>
+</div>
+          </td>
+        </tr>
+      </table>
+      <!-- End Centered Card Container -->
+    </td>
+  </tr>
+</table>
+</body></html>"""
     return html
 
 
 def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result, highlight_row):
     """
-    Build HTML string of single row in standings
+    Build HTML string of single row in standings with explicit inline styles for email client compatibility
     """
+    cell_style = "border: 1px solid black; padding: 6px; text-align: left;"
     if highlight_row is True:
         html = """
 <tr>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-<td><b>{}</b></td>
-</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+<td style="{}"><b>{}</b></td>
+</tr>""".format(cell_style, rank, cell_style, full_name, cell_style, wins, cell_style, losses, cell_style, win_percentage, cell_style, ats_points, cell_style, streak, cell_style, pick_as_string, cell_style, result)
     else:
         html = """
 <tr>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-<td>{}</td>
-</tr>""".format(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result)
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+<td style="{}">{}</td>
+</tr>""".format(cell_style, rank, cell_style, full_name, cell_style, wins, cell_style, losses, cell_style, win_percentage, cell_style, ats_points, cell_style, streak, cell_style, pick_as_string, cell_style, result)
 
     return html
 
@@ -194,7 +258,6 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
 
 
 def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
-    # Emit the metric emails_sent_count
     retval = False
     metric_data = [
         {
@@ -208,7 +271,6 @@ def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
         }
     ]
 
-    # Also emit ScheduledStandingsEmailsSent when triggered by an EventBridge scheduled event
     if request_type == "Scheduled Event":
         metric_data.append({
             'MetricName': 'ScheduledStandingsEmailsSent',
@@ -241,7 +303,6 @@ def lambda_handler(event, context):
     """
     Email LOTW standings to each player each week
     """
-
     logger.info("Received event: " + json.dumps(event, indent=2))
 
     request_type = event.get('detail-type')
@@ -257,14 +318,12 @@ def lambda_handler(event, context):
 
     logger.info("SUCCESS: Connection to MySQL database succeeded")
 
-    # initialize variables
     mail_username = os.environ['mail_username']
     mail_password = os.environ['mail_password']
     mail_host = os.environ['mail_host']
     mail_port = os.environ['mail_port']
     mail_from = '"Brendan Connell" <bmoney312@gmail.com>'
 
-    # --- Retry Configuration ---
     try:
         MAX_RETRIES = int(os.environ.get('SMTP_RETRIES', 5))
     except ValueError:
@@ -274,9 +333,7 @@ def lambda_handler(event, context):
         RETRY_SLEEP_SECONDS = int(os.environ.get('SMTP_RETRY_SLEEP', 15))
     except ValueError:
         RETRY_SLEEP_SECONDS = 15
-    # --- End Retry Configuration ---
 
-    # take single player_id as input if provided
     player_id = os.environ.get('player_id')
     start_with_player_id = os.environ.get('start_with_player_id')
 
@@ -300,14 +357,9 @@ def lambda_handler(event, context):
     logger.info("Request type is {}".format(request_type))
     logger.debug("Players {}".format(players))
 
-    # week to compute standings, set to last week unless
-    # environment variable week set then use same week
     standings_week = 0
-
-    # determine current week
     week = os.environ.get('week')
 
-    # if week is not provided
     if week is None:
         week = get_current_week(conn)
         if week is None:
@@ -321,12 +373,10 @@ def lambda_handler(event, context):
     logger.info("Standings week set to {}".format(standings_week))
     logger.info("Current time is {}".format(datetime.datetime.now()))
 
-    # get current standings
     standings = get_standings(conn)
     total_players_season = len(standings)
     current_year = get_current_year()
 
-    # get standings commish message
     if standings_week == 0:
         commish_message = 'Testing. Week 0 Standings.<br>'
     else:
@@ -346,7 +396,6 @@ def lambda_handler(event, context):
     weekly_games = []
 
     with conn.cursor() as cur:
-        # Pre-fetch standings week picks for all players
         picks_table = "Picks_{}".format(current_year)
         games_table = "Games_{}".format(current_year)
 
@@ -370,7 +419,6 @@ def lambda_handler(event, context):
             if pid not in picks_map:
                 picks_map[pid] = (p_pick, p_line, p_ats, bool(p_locked))
 
-        # Preload all games and all player picks for pick-report tables by default
         cur.execute("""
             SELECT home_team_id, away_team_id, home_team_line, away_team_score, home_team_score, week
             FROM {}
@@ -409,7 +457,6 @@ def lambda_handler(event, context):
     field_losses = total_players_season - field_wins
     field_pct = (field_wins / total_players_season * 100) if total_players_season > 0 else 0.0
 
-    # Calculate Favorites and Underdogs ATS records for the week
     fav_wins = 0
     fav_losses = 0
     dog_wins = 0
@@ -475,53 +522,48 @@ def lambda_handler(event, context):
     trends_html += "<b>Most picked loss:</b> {}<br>\n".format(most_picked_loss)
     trends_html += "<b>Best pick:</b> {}<br>\n".format(best_pick_str)
     trends_html += "<b>Worst pick:</b> {}<br>\n".format(worst_pick_str)
-    # --- End Weekly Trends Calculation ---
 
-    # initialize emails sent metric counter
     emails_sent_count = 0
-
-    # connect to SMTP relay
     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
     if smtp_relay is None:
         logger.error("Error establishing SMTP connection with {}".format(mail_host))
         sys.exit()
 
-    # email standings to each player
     for player in players:
         (player_id, player_email, last_name, first_name, titles, is_rookie) = player
         logger.info("Working on player {} {} {} {}".format(player_id, first_name, last_name, player_email))
 
-        # skip players less than start_with_player_id
-        # if start_with_player_id provided
         if start_with_player_id is not None and request_type != "test":
             if player_id < start_with_player_id:
                 logger.info("Skipping player {} which is less than start_with_player_id {}".format(player_id, start_with_player_id))
                 continue
 
-        # build message body
-        message = "<br>"
-
-        # include trends report
+        # Open body and centered container card
+        message = """<body>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f6f6f6;">
+  <tr>
+    <td align="center" style="padding: 20px 10px;">
+      <!-- Centered Card Container -->
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 650px; background-color: #ffffff; border-radius: 6px; padding: 20px;">
+        <tr>
+          <td>
+"""
+        message += commish_message + "<br>"
         message += trends_html
 
-        # include pick report by default
         logger.info("Building pick report for player {}".format(player_id))
         message += "<br><h3>Your picks:</h3>\n"
 
-        # Get Current Season Details
         weekly_data, season_fav, season_dog, season_pickem = get_player_season_details_cached(
             player_id, player_picks_by_player, games_by_week_team
         )
 
-        # Find Rank and Record from current standings
         season_wins = 0
         season_losses = 0
         season_ats = 0
         rank = "-"
 
-        # Standings tuple: (id, last, first, titles, rookie, wins, losses, win_pct, ats, streak)
-        # We iterate to find the player and their index (rank)
         for i, row in enumerate(standings):
             if row[0] == player_id:
                 rank = i + 1
@@ -537,26 +579,46 @@ def lambda_handler(event, context):
         message += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
         message += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
 
-        # Updated table headers and row to include Game Result
-        message += "<table><tr><th>Week</th><th>Pick</th><th>Game Result</th><th>Site</th><th>Type</th><th>Result</th></tr>"
+        cell_style = "border: 1px solid black; padding: 6px; text-align: left;"
+        message += """
+<table class="email-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
+<tr>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Pick</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Game Result</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Site</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Type</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Result</th>
+</tr>"""
         for row in weekly_data:
             if row['pick_ats'] is not None:
                 res_class = "win" if row['pick_ats'] > 0 else "loss"
             else:
                 res_class = ""
 
-            message += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class='{}'>{}</td></tr>".format(
-                row['week'], row['pick'], row['game_result'], row['site'], row['type'], res_class, row['result']
+            message += """
+<tr>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}" class="{}">{}</td>
+</tr>""".format(
+                cell_style, row['week'],
+                cell_style, row['pick'],
+                cell_style, row['game_result'],
+                cell_style, row['site'],
+                cell_style, row['type'],
+                cell_style, res_class, row['result']
             )
         message += "</table><br>\n"
 
-        # build email body for this player
         standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
-        mail_body = build_html_head() + "\n<body>\n" + commish_message + message + standings_html + "<br></body></html>"
+        mail_body = build_standings_email_head() + "\n" + message + standings_html
         mail_to = (player_email, 'bmoney312@gmail.com')
         mail_subject = "lotw: week {} standings".format(standings_week)
 
-        # adjust subject for playoff rounds
         if standings_week == 19:
             mail_subject = "lotw: week {} standings (wildcard weekend)".format(standings_week)
         elif standings_week == 20:
@@ -566,7 +628,6 @@ def lambda_handler(event, context):
         elif standings_week == 22:
             mail_subject = "lotw: week {} standings (super bowl)".format(standings_week)
 
-        # --- Send email with retry logic ---
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
             email_result = smtp_send(smtp_relay, mail_subject, mail_body, mail_to, mail_from)
@@ -575,7 +636,7 @@ def lambda_handler(event, context):
                 logger.info("Email sent successfully to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 email_sent_successfully = True
                 emails_sent_count += 1
-                break  # Exit retry loop on success
+                break
             else:
                 logger.error("Email failed to player {} {} on attempt {}".format(player_id, player_email, attempt + 1))
                 if attempt <= MAX_RETRIES:
@@ -583,17 +644,15 @@ def lambda_handler(event, context):
                     smtp_relay.close()
                     sleep(RETRY_SLEEP_SECONDS)
 
-                    # Reconnect to SMTP relay
                     smtp_relay = None
                     smtp_relay = smtp_connect(mail_host, mail_port, mail_username, mail_password)
 
                     if smtp_relay is None:
                         logger.error("Error re-establishing SMTP connection with {}. Stopping retries for this player.".format(mail_host))
-                        break  # Break retry loop if reconnect fails
+                        break
                 else:
                     logger.error("All {} retry attempts failed for player {} {}".format(MAX_RETRIES, player_id, player_email))
 
-        # If all retries failed, log and handle
         if not email_sent_successfully:
             logger.error("Aborting email send for player {} {} after all retries.".format(player_id, player_email))
 
@@ -603,28 +662,16 @@ def lambda_handler(event, context):
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
-            # email emails sent metric
             emit_emails_sent_metric(standings_week, emails_sent_count, request_type)
-
-            # close database connection
             conn.close()
 
-            # return error if all players do not receive email
             logger.info("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
             raise RuntimeError("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
 
-        # Gentle pacing
         sleep(2)
 
-    # emit emails sent metric
     emit_emails_sent_metric(standings_week, emails_sent_count, request_type)
-
-    # close database connection
     conn.close()
-
-    # close SMTP connection
     smtp_relay.close()
-
-    # return result
     logger.info("Standings for week {} sent successfully to {} players.".format(standings_week, emails_sent_count))
     return response(200, 'text/html', build_html("Standings for week {} sent successfully to {} players.".format(standings_week, emails_sent_count)))
