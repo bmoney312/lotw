@@ -198,11 +198,6 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         rank += 1
 
     html += """</table>
-<div class="footer-logo" style="text-align: center; margin-top: 25px;">
-  <a href="https://aws.amazon.com/what-is-cloud-computing">
-    <img src="https://d0.awsstatic.com/logos/powered-by-aws.png" alt="Powered by AWS Cloud Computing" style="display: inline-block;">
-  </a>
-</div>
           </td>
         </tr>
       </table>

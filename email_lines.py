@@ -141,11 +141,6 @@ def build_lines_email_body(player_id, week, token, games_list, team_names_map):
 <div class="footnote" style="text-align: center; margin-top: 10px;">
   <p>&#42;&#42;<font size="-1"><b>all times US/Eastern timezone</b></font></p>
 </div>
-<div class="footer-logo" style="text-align: center; margin-top: 25px;">
-  <a href="https://aws.amazon.com/what-is-cloud-computing">
-    <img src="https://d0.awsstatic.com/logos/powered-by-aws.png" alt="Powered by AWS Cloud Computing" style="display: inline-block;">
-  </a>
-</div>
           </td>
         </tr>
       </table>
