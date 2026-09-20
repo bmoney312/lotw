@@ -34,76 +34,82 @@ def is_week_fully_started(conn, week):
 
 def build_picks_html_row(rank, full_name, wins, losses, ats_points, streak, pick, highlight_row):
     """
-    Build picks email table row
+    Build picks email table row with inline borders and cell padding for email clients.
     """
+    cell_style = "border: 1px solid black; padding: 6px; text-align: left;"
     if highlight_row is True:
         table_row = """
 <tr>
-    <td><b>{}</b></td>
-    <td><b>{}</b></td>
-    <td><b>{}</b></td>
-    <td><b>{}</b></td>
-    <td><b>{}</b></td>
-    <td><b>{}</b></td>
-    <td><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
+    <td style="{}"><b>{}</b></td>
 </tr>
-""".format(rank, full_name, wins, losses, ats_points, streak, pick)
+""".format(cell_style, rank, cell_style, full_name, cell_style, wins, cell_style, losses, cell_style, ats_points, cell_style, streak, cell_style, pick)
     else:
         table_row = """
 <tr>
-    <td>{}</td>
-    <td>{}</td>
-    <td>{}</td>
-    <td>{}</td>
-    <td>{}</td>
-    <td>{}</td>
-    <td>{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
+    <td style="{}">{}</td>
 </tr>
-""".format(rank, full_name, wins, losses, ats_points, streak, pick)
+""".format(cell_style, rank, cell_style, full_name, cell_style, wins, cell_style, losses, cell_style, ats_points, cell_style, streak, cell_style, pick)
 
     return table_row
 
 
 def build_picks_email_head():
     """
-    Build picks email head
+    Build picks email head with centered layout styles.
     """
-
     html = """
 <html>
 <head>
- <head>
-   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
     <style>
-         .inline {
-           display: inline;
-         }
-
-         .message {
-           display: inline;
-         }
-
          body {
-             margin: 12;
+             margin: 0;
+             padding: 0;
+             width: 100% !important;
+             background-color: #f6f6f6;
              font-family: "Arial", "Helvetica", sans-serif;
          }
-         h3 {
-             padding: 5px;
+         h4 {
+             text-align: center;
+             margin-top: 10px;
+             margin-bottom: 20px;
          }
-         table {
+         table.picks-table {
+             width: 100%;
+             max-width: 600px;
+             margin: 0 auto;
              border-collapse: collapse;
              border: 1px solid black;
          }
-         th {
+         table.picks-table th {
              border: 1px solid black;
              padding: 6px;
              text-align: left;
              background-color: lightgrey;
          }
-         td {
+         table.picks-table td {
              border: 1px solid black;
              padding: 6px;
              text-align: left;
+         }
+         .footer-logo {
+             text-align: center;
+             margin-top: 25px;
+             margin-bottom: 15px;
          }
     </style>
 </head>
@@ -113,17 +119,18 @@ def build_picks_email_head():
 
 def build_picks_email_body(week, standings, current_picks, message, send_pick_summary, current_player_id, all_games_started):
     """
-    Given database connection and current week, return body of
-    LOTW line email without the html/body tags
-
-    send_pick_summary is boolean, send pick for all players if true (even NOP)
-
-    current_picks is dict of format player_id => teams
-
-    all_games_started is boolean, True if all games in current week have started
-    used for NO PICK logic
+    Given database connection and current week, return centered body container for LOTW picks email.
     """
-    html = "<body>\n<p>{}</p><br>".format(message)
+    # Open centered wrapper table and card container
+    html = """<body>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f6f6f6;">
+  <tr>
+    <td align="center" style="padding: 20px 10px;">
+      <!-- Centered Card Container -->
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 650px; background-color: #ffffff; border-radius: 6px; padding: 20px;">
+        <tr>
+          <td>
+            <p>{}</p><br>""".format(message)
 
     # adjust header for playoff rounds
     if week == 19:
@@ -138,15 +145,15 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         html += "<h4>LOTW: WEEK {} PICKS</h4>\n".format(week)
 
     html += """
-<table>
+<table class="picks-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
 <tr>
-    <th>Rank</th>
-    <th>Player</th>
-    <th>Wins</th>
-    <th>Losses</th>
-    <th>ATS Points</th>
-    <th>Streak</th>
-    <th>Week {} Pick</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Rank</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Player</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Wins</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Losses</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">ATS Points</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Streak</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {} Pick</th>
 </tr>
 """.format(week)
 
@@ -190,8 +197,20 @@ def build_picks_email_body(week, standings, current_picks, message, send_pick_su
         html += build_picks_html_row(rank_as_string, full_name, wins, losses, ats_points, streak, pick_as_string, highlight_row)
         rank += 1
 
-    html = html + "</table>"
-    html = html + "<br><br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
+    html += """</table>
+<div class="footer-logo" style="text-align: center; margin-top: 25px;">
+  <a href="https://aws.amazon.com/what-is-cloud-computing">
+    <img src="https://d0.awsstatic.com/logos/powered-by-aws.png" alt="Powered by AWS Cloud Computing" style="display: inline-block;">
+  </a>
+</div>
+          </td>
+        </tr>
+      </table>
+      <!-- End Centered Card Container -->
+    </td>
+  </tr>
+</table>
+</body></html>"""
     return html
 
 
