@@ -29,10 +29,10 @@ def build_lines_table_row(player_id, week, kickoff_time, away_team_id, home_team
         game_line = "OFF"
         table_row = """
     <tr>
-        <td>{}</td>
-        <td>{}</td>
-        <td>{}</td>
-        <td>{}</td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;">{}</td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;">{}</td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;">{}</td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;">{}</td>
     </tr>
 """.format(f_kickoff_time, away_team_name, home_team_name, game_line)
     else:
@@ -45,10 +45,10 @@ def build_lines_table_row(player_id, week, kickoff_time, away_team_id, home_team
 
         table_row = """
     <tr>
-        <td>{}</td>
-        <td><a href="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit?week={}&id={}&pick={}&token={}">{}</a></td>
-        <td><a href="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit?week={}&id={}&pick={}&token={}">{}</a></td>
-        <td>{}</td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;">{}</td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;"><a href="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit?week={}&id={}&pick={}&token={}">{}</a></td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;"><a href="https://w95d9hh2z8.execute-api.us-west-2.amazonaws.com/prod/submit?week={}&id={}&pick={}&token={}">{}</a></td>
+        <td style="border: 1px solid black; padding: 6px; text-align: left;">{}</td>
     </tr>
 """.format(f_kickoff_time, week, player_id, away_team_id, token, away_team_name, week, player_id, home_team_id, token, home_team_name, game_line)
 
@@ -59,16 +59,49 @@ def build_lines_email_head():
     html = """
 <html>
 <head>
- <head>
-   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
     <style>
-         .inline { display: inline; }
-         .message { display: inline; }
-         body { margin: 12; font-family: "Arial", "Helvetica", sans-serif; }
-         h3 { padding: 2px; }
-         table { border-collapse: collapse; border: 1px solid black; }
-         th { border: 1px solid black; padding: 6px; text-align: left; background-color: lightgrey; }
-         td { border: 1px solid black; padding: 6px; text-align: left; }
+         body {
+             margin: 0;
+             padding: 0;
+             width: 100% !important;
+             background-color: #f6f6f6;
+             font-family: "Arial", "Helvetica", sans-serif;
+         }
+         h3 {
+             text-align: center;
+             margin-top: 10px;
+             margin-bottom: 20px;
+         }
+         table.lines-table {
+             width: 100%;
+             max-width: 560px;
+             margin: 0 auto;
+             border-collapse: collapse;
+             border: 1px solid black;
+         }
+         table.lines-table th {
+             border: 1px solid black;
+             padding: 6px;
+             text-align: left;
+             background-color: lightgrey;
+         }
+         table.lines-table td {
+             border: 1px solid black;
+             padding: 6px;
+             text-align: left;
+         }
+         .footnote {
+             text-align: center;
+             margin-top: 10px;
+         }
+         .footer-logo {
+             text-align: center;
+             margin-top: 25px;
+             margin-bottom: 15px;
+         }
     </style>
 </head>
 """
@@ -79,31 +112,48 @@ def build_lines_email_body(player_id, week, token, games_list, team_names_map):
     """
     Given pre-fetched games and team map, return body of LOTW line email without DB roundtrips.
     """
-    html = "<h3>LOTW: WEEK {} LINES</h3>\n".format(week)
+    header_title = "LOTW: WEEK {} LINES".format(week)
     if week == 19:
-        html = "<h3>LOTW: WEEK {} LINES (WILDCARD WEEKEND)</h3>\n".format(week)
+        header_title = "LOTW: WEEK {} LINES (WILDCARD WEEKEND)".format(week)
     elif week == 20:
-        html = "<h3>LOTW: WEEK {} LINES (DIVISIONAL PLAYOFFS)</h3>\n".format(week)
+        header_title = "LOTW: WEEK {} LINES (DIVISIONAL PLAYOFFS)".format(week)
     elif week == 21:
-        html = "<h3>LOTW: WEEK {} LINES (CONFERENCE CHAMPIONSHIPS)</h3>\n".format(week)
+        header_title = "LOTW: WEEK {} LINES (CONFERENCE CHAMPIONSHIPS)".format(week)
     elif week == 22:
-        html = "<h3>LOTW: SUPER BOWL LINE</h3>\n"
+        header_title = "LOTW: SUPER BOWL LINE"
+
+    html = "<h3>{}</h3>\n".format(header_title)
 
     html += """
-<table>
+<table class="lines-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
 <tr>
-    <th>Kickoff Time&#42;&#42;</th>
-    <th>Away Team</th>
-    <th>Home Team</th>
-    <th>Line</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Kickoff Time&#42;&#42;</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Away Team</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Home Team</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Line</th>
 </tr>
 """
     for row in games_list:
         kickoff_time, away_team_id, home_team_id, home_team_line = row
         html += build_lines_table_row(player_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, token, team_names_map)
 
-    html += "</table><p>&#42;&#42;<font size=-1><b>all times US/Eastern timezone</b></font></p><br>"
-    html += "<br><a href=\"https://aws.amazon.com/what-is-cloud-computing\"><img src=\"https://d0.awsstatic.com/logos/powered-by-aws.png\" alt=\"Powered by AWS Cloud Computing\"></a></body></html>"
+    html += """</table>
+<div class="footnote" style="text-align: center; margin-top: 10px;">
+  <p>&#42;&#42;<font size="-1"><b>all times US/Eastern timezone</b></font></p>
+</div>
+<div class="footer-logo" style="text-align: center; margin-top: 25px;">
+  <a href="https://aws.amazon.com/what-is-cloud-computing">
+    <img src="https://d0.awsstatic.com/logos/powered-by-aws.png" alt="Powered by AWS Cloud Computing" style="display: inline-block;">
+  </a>
+</div>
+          </td>
+        </tr>
+      </table>
+      <!-- End Centered Container Card -->
+    </td>
+  </tr>
+</table>
+</body></html>"""
     return html
 
 
@@ -270,7 +320,17 @@ def lambda_handler(event, context):
                 logger.info("Player {} {} pick locked in {} {}, lines not sent".format(player_id, player_email, current_pick, formatted_line(current_line)))
                 continue
 
-        message = "<body>\n<p>Hello {},<br><br>".format(first_name)
+        # Centered Outer Table & Card Container opening
+        message = """<body>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f6f6f6;">
+  <tr>
+    <td align="center" style="padding: 20px 10px;">
+      <!-- Centered Container Card -->
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 6px; padding: 20px;">
+        <tr>
+          <td>
+            <p>Hello {},<br><br>""".format(first_name)
+
         if current_pick == "NOP" or current_pick is None:
             message += "You do not have a recorded week {} pick. ".format(week)
             message += "Please <b>click the link of a team below</b> to make your selection.<br><br>"
