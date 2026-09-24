@@ -183,14 +183,15 @@ def lambda_handler(event, context):
     current_year = get_current_year()
     logger.info("Target season locked to current year: %s", current_year)
 
-    # Determine single week (defaulting to current_week)
+    # Determine single week (defaulting to current_week - 1)
     target_week = os.environ.get('week')
     if query_params.get('week'):
         target_week = query_params.get('week')
 
     if target_week is None:
-        target_week = get_current_week(conn)
-        logger.info("Defaulting to current week: %s", target_week)
+        current_week = get_current_week(conn)
+        target_week = int(current_week) - 1
+        logger.info("Defaulting to last week: %s", target_week)
     else:
         target_week = int(target_week)
 
