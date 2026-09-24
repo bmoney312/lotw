@@ -52,6 +52,10 @@ def normalize_line_to_integer(raw_home_line):
     if 6.5 <= abs_line <= 7.5:
         return sign * 7
 
+    # Round 2.5 to 3.0
+    if abs_line == 2.5:
+        return sign * 3
+
     # Otherwise strip the .5 / truncate towards zero
     return sign * int(abs_line)
 
