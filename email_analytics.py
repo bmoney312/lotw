@@ -14,7 +14,7 @@ logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
 # Starting season/year for pick and game data in analytics run
-ANALYTICS_START_YEAR = 2018
+ANALYTICS_START_YEAR = 2016
 
 
 # --- Helper Functions ---
