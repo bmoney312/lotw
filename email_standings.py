@@ -15,6 +15,23 @@ logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
 
+def get_standings_for_year(conn, year):
+    """
+    Return LOTW standings for the specified year with player names and attributes.
+    """
+    with conn.cursor() as cur:
+        select_statement = f"""
+            SELECT s.player_id, p.last_name, p.first_name, p.past_titles,
+                   p.rookie, s.wins, s.losses, s.win_percentage, s.ats_points, s.streak
+            FROM `Standings_{year}` s
+            INNER JOIN `Players` p ON s.player_id = p.player_id
+            WHERE p.`{year}_registration` = 1
+            ORDER BY s.win_percentage DESC, s.ats_points DESC, p.last_name ASC, p.first_name ASC
+        """
+        cur.execute(select_statement)
+        return cur.fetchall()
+
+
 def build_standings_email_head():
     """
     Build email head with left-justified header and centered card container styling.
@@ -69,20 +86,23 @@ def build_standings_email_head():
     return html
 
 
-def get_standings_html(week, standings, current_player_id, picks_map):
+def get_standings_html(week, standings, current_player_id, picks_map, year=None, is_past_year=False):
     """
-    Return string of LOTW standings in centered HTML table with left-justified header
+    Return string of LOTW standings in centered HTML table with left-justified header.
+    Prepends year to header when displaying past year standings.
     """
+    year_prefix = f"{year} " if is_past_year else ""
+
     if week == 19:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n'.format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n'.format(year_prefix, week)
     elif week == 20:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n'.format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n'.format(year_prefix, week)
     elif week == 21:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n'.format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n'.format(year_prefix, week)
     elif week == 22:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n'.format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (SUPER BOWL)</h3>\n'.format(year_prefix, week)
     else:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS</h3>\n'.format(week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS</h3>\n'.format(year_prefix, week)
 
     html += """
 <table class="email-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
@@ -117,7 +137,7 @@ def get_standings_html(week, standings, current_player_id, picks_map):
         else:
             pick_as_string = "{} {}".format(pick, formatted_line(line))
 
-        if pick_ats > 0:
+        if pick_ats is not None and pick_ats > 0:
             pick_ats_as_string = "+{}".format(pick_ats)
         else:
             pick_ats_as_string = str(pick_ats)
@@ -190,7 +210,7 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 
 def get_player_season_details_cached(player_id, player_picks_by_player, games_by_week_team):
     """
-    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
+    Get weekly breakdown for the season: Week, Pick, Game Result, Site, Result, Fav/Dog status.
     Uses in-memory dictionaries to eliminate N+1 DB calls.
     """
     rows = player_picks_by_player.get(player_id, [])
@@ -253,13 +273,16 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
     return weekly_data, fav_count, dog_count, pickem_count
 
 
-def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
+def emit_emails_sent_metric(week, emails_sent_count, request_type=None, year=None):
+    if year is None:
+        year = get_current_year()
+
     retval = False
     metric_data = [
         {
             'MetricName': 'StandingsEmailsSent',
             'Dimensions': [
-                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Year', 'Value': str(year)},
                 {'Name': 'Week', 'Value': str(week)}
             ],
             'Value': emails_sent_count,
@@ -271,7 +294,7 @@ def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
         metric_data.append({
             'MetricName': 'ScheduledStandingsEmailsSent',
             'Dimensions': [
-                {'Name': 'Year', 'Value': str(get_current_year())},
+                {'Name': 'Year', 'Value': str(year)},
                 {'Name': 'Week', 'Value': str(week)}
             ],
             'Value': emails_sent_count,
@@ -284,9 +307,10 @@ def emit_emails_sent_metric(week, emails_sent_count, request_type=None):
             MetricData=metric_data
         )
         logger.info(
-            "Emitted metric(s) for count %s (scheduled=%s)",
+            "Emitted metric(s) for count %s (scheduled=%s, year=%s)",
             emails_sent_count,
-            request_type == "Scheduled Event"
+            request_type == "Scheduled Event",
+            year
         )
         retval = True
     except Exception as e:
@@ -337,6 +361,40 @@ def lambda_handler(event, context):
         start_with_player_id = int(start_with_player_id)
         logger.info("Starting with player_id {}".format(start_with_player_id))
 
+    # Determine target year
+    current_year = get_current_year()
+    query_params = event.get('queryStringParameters') or {}
+    year_param = event.get('year') or os.environ.get('year') or query_params.get('year')
+
+    if year_param is not None and str(year_param).strip() != '':
+        try:
+            year = int(year_param)
+        except ValueError:
+            error_msg = "Invalid year value: '{}' is not an integer".format(year_param)
+            logger.error(error_msg)
+            conn.close()
+            return response(400, 'text/html', build_html(error_msg))
+
+        if not (2000 < year <= current_year):
+            error_msg = "Invalid year: {}. Year must be > 2000 and <= current year ({})".format(year, current_year)
+            logger.error(error_msg)
+            conn.close()
+            return response(400, 'text/html', build_html(error_msg))
+    else:
+        year = current_year
+
+    # Add target year to INFO log
+    logger.info("Target year set to {}".format(year))
+
+    is_past_year = year < current_year
+
+    # Only allow sending of past year standings as a test event
+    if is_past_year and request_type != "test":
+        error_msg = "Error: Sending past year standings ({}) is only allowed as a test event (request_type='test').".format(year)
+        logger.error(error_msg)
+        conn.close()
+        return response(400, 'text/html', build_html(error_msg))
+
     if request_type == "Scheduled Event":
         players = get_all_paid_players(conn)
     elif request_type == "manual_run":
@@ -348,33 +406,47 @@ def lambda_handler(event, context):
         players = get_player(conn, int(1))
     else:
         logger.error("Invalid request type {}".format(request_type))
+        conn.close()
         sys.exit()
 
     logger.info("Request type is {}".format(request_type))
     logger.debug("Players {}".format(players))
 
     standings_week = 0
-    week = os.environ.get('week')
 
-    if week is None:
-        week = get_current_week(conn)
-        if week is None:
-            logger.error("ERROR: Unable to determine current week!")
-            sys.exit()
-        standings_week = int(week) - 1
+    # Automatically set week for past years (week 21 for <= 2020, week 22 for 2021+)
+    if is_past_year:
+        standings_week = 21 if year <= 2020 else 22
+        week = standings_week
+        logger.info("Past year {} detected. Automatically setting final standings week to {}".format(year, standings_week))
     else:
-        standings_week = int(week)
+        week = os.environ.get('week')
+        if week is None:
+            week = get_current_week(conn)
+            if week is None:
+                logger.error("ERROR: Unable to determine current week!")
+                conn.close()
+                sys.exit()
+            standings_week = int(week) - 1
+        else:
+            standings_week = int(week)
 
     logger.info("Current week set to {}".format(week))
     logger.info("Standings week set to {}".format(standings_week))
     logger.info("Current time is {}".format(datetime.datetime.now()))
 
-    standings = get_standings(conn)
+    # Fetch standings for target year
+    if is_past_year:
+        standings = get_standings_for_year(conn, year)
+    else:
+        standings = get_standings(conn)
+
     total_players_season = len(standings)
-    current_year = get_current_year()
 
     if standings_week == 0:
         commish_message = 'Testing. Week 0 Standings.<br>'
+    elif is_past_year:
+        commish_message = "Testing final standings for the {} season (Week {}).<br>".format(year, standings_week)
     else:
         commish_message = get_standings_message(conn, standings_week)
 
@@ -383,6 +455,7 @@ def lambda_handler(event, context):
             commish_message = "Testing standings for week {}.<br>".format(standings_week)
         else:
             logger.error("Unexpected missing value for commish message")
+            conn.close()
             sys.exit()
 
     # --- Pre-fetch Current Week Picks and Season Game Results ---
@@ -392,8 +465,8 @@ def lambda_handler(event, context):
     weekly_games = []
 
     with conn.cursor() as cur:
-        picks_table = "Picks_{}".format(current_year)
-        games_table = "Games_{}".format(current_year)
+        picks_table = "Picks_{}".format(year)
+        games_table = "Games_{}".format(year)
 
         cur.execute("""
             SELECT p.player_id, p.pick,
@@ -524,6 +597,7 @@ def lambda_handler(event, context):
 
     if smtp_relay is None:
         logger.error("Error establishing SMTP connection with {}".format(mail_host))
+        conn.close()
         sys.exit()
 
     for player in players:
@@ -610,19 +684,22 @@ def lambda_handler(event, context):
             )
         message += "</table><br>\n"
 
-        standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
+        standings_html = get_standings_html(standings_week, standings, player_id, picks_map, year=year, is_past_year=is_past_year)
         mail_body = build_standings_email_head() + "\n" + message + standings_html
         mail_to = (player_email, 'bmoney312@gmail.com')
-        mail_subject = "lotw: week {} standings".format(standings_week)
+
+        # Add year to subject when emailing past year standings
+        subject_year = f"{year} " if is_past_year else ""
+        mail_subject = "lotw: {}week {} standings".format(subject_year, standings_week)
 
         if standings_week == 19:
-            mail_subject = "lotw: week {} standings (wildcard weekend)".format(standings_week)
+            mail_subject = "lotw: {}week {} standings (wildcard weekend)".format(subject_year, standings_week)
         elif standings_week == 20:
-            mail_subject = "lotw: week {} standings (divisional playoffs)".format(standings_week)
+            mail_subject = "lotw: {}week {} standings (divisional playoffs)".format(subject_year, standings_week)
         elif standings_week == 21:
-            mail_subject = "lotw: week {} standings (conference championships)".format(standings_week)
+            mail_subject = "lotw: {}week {} standings (conference championships)".format(subject_year, standings_week)
         elif standings_week == 22:
-            mail_subject = "lotw: week {} standings (super bowl)".format(standings_week)
+            mail_subject = "lotw: {}week {} standings (super bowl)".format(subject_year, standings_week)
 
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
@@ -658,7 +735,7 @@ def lambda_handler(event, context):
                 logger.info("Closing connection to SMTP relay.")
                 smtp_relay.close()
 
-            emit_emails_sent_metric(standings_week, emails_sent_count, request_type)
+            emit_emails_sent_metric(standings_week, emails_sent_count, request_type, year=year)
             conn.close()
 
             logger.info("Standings for week {} send failed for player {} after {} attempts. Aborting.".format(standings_week, player_id, MAX_RETRIES))
@@ -666,8 +743,8 @@ def lambda_handler(event, context):
 
         sleep(2)
 
-    emit_emails_sent_metric(standings_week, emails_sent_count, request_type)
+    emit_emails_sent_metric(standings_week, emails_sent_count, request_type, year=year)
     conn.close()
     smtp_relay.close()
-    logger.info("Standings for week {} sent successfully to {} players.".format(standings_week, emails_sent_count))
-    return response(200, 'text/html', build_html("Standings for week {} sent successfully to {} players.".format(standings_week, emails_sent_count)))
+    logger.info("Standings for week {} (year {}) sent successfully to {} players.".format(standings_week, year, emails_sent_count))
+    return response(200, 'text/html', build_html("Standings for week {} (year {}) sent successfully to {} players.".format(standings_week, year, emails_sent_count)))
