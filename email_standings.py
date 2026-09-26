@@ -687,7 +687,7 @@ def lambda_handler(event, context):
 
         # Subject line logic
         if is_past_year:
-            mail_subject = "lotw: final standings for year {} - {}".format(year, year + 1)
+            mail_subject = "lotw: final standings {} - {}".format(year, year + 1)
         else:
             mail_subject = "lotw: week {} standings".format(standings_week)
             if standings_week == 19:
