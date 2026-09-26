@@ -86,23 +86,20 @@ def build_standings_email_head():
     return html
 
 
-def get_standings_html(week, standings, current_player_id, picks_map, year=None, is_past_year=False):
+def get_standings_html(week, standings, current_player_id, picks_map):
     """
-    Return string of LOTW standings in centered HTML table with left-justified header.
-    Prepends year to header when displaying past year standings.
+    Return string of LOTW standings in centered HTML table with left-justified header
     """
-    year_prefix = f"{year} " if is_past_year else ""
-
     if week == 19:
-        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n'.format(year_prefix, week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n'.format(week)
     elif week == 20:
-        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n'.format(year_prefix, week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n'.format(week)
     elif week == 21:
-        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n'.format(year_prefix, week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n'.format(week)
     elif week == 22:
-        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS (SUPER BOWL)</h3>\n'.format(year_prefix, week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n'.format(week)
     else:
-        html = '<br><br><h3 style="text-align: left;">LOTW: {}WEEK {} STANDINGS</h3>\n'.format(year_prefix, week)
+        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS</h3>\n'.format(week)
 
     html += """
 <table class="email-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
@@ -210,7 +207,7 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 
 def get_player_season_details_cached(player_id, player_picks_by_player, games_by_week_team):
     """
-    Get weekly breakdown for the season: Week, Pick, Game Result, Site, Result, Fav/Dog status.
+    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
     Uses in-memory dictionaries to eliminate N+1 DB calls.
     """
     rows = player_picks_by_player.get(player_id, [])
@@ -684,22 +681,23 @@ def lambda_handler(event, context):
             )
         message += "</table><br>\n"
 
-        standings_html = get_standings_html(standings_week, standings, player_id, picks_map, year=year, is_past_year=is_past_year)
+        standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
         mail_body = build_standings_email_head() + "\n" + message + standings_html
         mail_to = (player_email, 'bmoney312@gmail.com')
 
-        # Add year to subject when emailing past year standings
-        subject_year = f"{year} " if is_past_year else ""
-        mail_subject = "lotw: {}week {} standings".format(subject_year, standings_week)
-
-        if standings_week == 19:
-            mail_subject = "lotw: {}week {} standings (wildcard weekend)".format(subject_year, standings_week)
-        elif standings_week == 20:
-            mail_subject = "lotw: {}week {} standings (divisional playoffs)".format(subject_year, standings_week)
-        elif standings_week == 21:
-            mail_subject = "lotw: {}week {} standings (conference championships)".format(subject_year, standings_week)
-        elif standings_week == 22:
-            mail_subject = "lotw: {}week {} standings (super bowl)".format(subject_year, standings_week)
+        # Subject line logic
+        if is_past_year:
+            mail_subject = "lotw: final standings for year {} - {}".format(year, year + 1)
+        else:
+            mail_subject = "lotw: week {} standings".format(standings_week)
+            if standings_week == 19:
+                mail_subject = "lotw: week {} standings (wildcard weekend)".format(standings_week)
+            elif standings_week == 20:
+                mail_subject = "lotw: week {} standings (divisional playoffs)".format(standings_week)
+            elif standings_week == 21:
+                mail_subject = "lotw: week {} standings (conference championships)".format(standings_week)
+            elif standings_week == 22:
+                mail_subject = "lotw: week {} standings (super bowl)".format(standings_week)
 
         email_sent_successfully = False
         for attempt in range(MAX_RETRIES):
