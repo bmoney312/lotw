@@ -13,6 +13,9 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 cloudwatch = boto3.client('cloudwatch')
 
+# Starting season/year for pick and game data in analytics run
+ANALYTICS_START_YEAR = 2018
+
 
 # --- Helper Functions ---
 def build_analytics_cache(conn, start_year, end_year):
@@ -325,7 +328,8 @@ def build_analytics_html(
     team_ats_records,
     all_career_standings,
     yearly_history,
-    current_player_id
+    current_player_id,
+    start_year=ANALYTICS_START_YEAR
 ):
     """
     Construct the full HTML body for the email.
@@ -376,7 +380,7 @@ def build_analytics_html(
     career_total = career_wins + career_losses
     career_pct = (career_wins / career_total * 100) if career_total > 0 else 0.0
 
-    html += "<h3>Career Performance (since 2018)</h3>"
+    html += "<h3>Career Performance (since {})</h3>".format(start_year)
     html += "<b>Your Career Record:</b> {}-{} ({:.1f}%)<br>".format(career_wins, career_losses, career_pct)
     html += "<b>Your Career Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(career_fav, career_dog, career_pickem)
 
@@ -403,7 +407,7 @@ def build_analytics_html(
     html += "</table><br><br>"
 
     # 4. All Players Career Records
-    html += "<h3>LOTW: Top 50 Career Win Percentage (since 2018)</h3>"
+    html += "<h3>LOTW: Top 50 Career Win Percentage (since {})</h3>".format(start_year)
     html += "<p><b>Active players. Minimum two seasons. NO PICKs counted as losses.</b></p>"
     html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
 
@@ -556,14 +560,14 @@ def lambda_handler(event, context):
     # --- Pre-calculate Global Stats (Shared across all emails) ---
     logger.info("Calculating Global Stats...")
 
-    # Load 2018-present picks and games once upfront
-    games_cache, picks_cache = build_analytics_cache(conn, 2018, current_year)
+    # Load start_year-present picks and games once upfront
+    games_cache, picks_cache = build_analytics_cache(conn, ANALYTICS_START_YEAR, current_year)
 
     # 1. Team ATS Records for current year
     team_ats_records = get_team_ats_records(conn, current_year)
 
-    # 2. All Players Career Standings (2018 to Current)
-    all_career_standings = get_all_career_standings(conn, 2018, current_year, picks_cache, games_cache)
+    # 2. All Players Career Standings (start_year to Current)
+    all_career_standings = get_all_career_standings(conn, ANALYTICS_START_YEAR, current_year, picks_cache, games_cache)
 
     # 3. Current Year Standings (to get rank)
     current_standings = get_standings(conn)  # List of tuples, need to parse to find rank
@@ -606,10 +610,10 @@ def lambda_handler(event, context):
 
         # 2. Get Career Stats (Player specific)
         logger.info("Generating career stats for {} {} ({})".format(first, last, p_id))
-        c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(p_id, 2018, current_year, picks_cache, games_cache)
+        c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(p_id, ANALYTICS_START_YEAR, current_year, picks_cache, games_cache)
 
         # 3. Get Yearly History (New)
-        yearly_history = get_player_yearly_history(p_id, 2018, current_year, picks_cache)
+        yearly_history = get_player_yearly_history(p_id, ANALYTICS_START_YEAR, current_year, picks_cache)
 
         # 4. Build HTML
         html_body = build_analytics_html(
@@ -619,7 +623,8 @@ def lambda_handler(event, context):
             team_ats_records,
             all_career_standings,
             yearly_history,
-            p_id
+            p_id,
+            start_year=ANALYTICS_START_YEAR
         )
 
         report_week = 1
