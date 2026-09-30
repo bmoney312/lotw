@@ -207,7 +207,7 @@ def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_
 
 def get_player_season_details_cached(player_id, player_picks_by_player, games_by_week_team):
     """
-    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status.
+    Get weekly breakdown for current year: Week, Pick, Game Result, Site, Result, Fav/Dog status, and No Pick count.
     Uses in-memory dictionaries to eliminate N+1 DB calls.
     """
     rows = player_picks_by_player.get(player_id, [])
@@ -215,10 +215,14 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
     fav_count = 0
     dog_count = 0
     pickem_count = 0
+    nop_count = 0
 
     for row in rows:
         week, pick, pick_ats = row
         game = games_by_week_team.get((week, pick))
+
+        if pick == "NOP" or pick is None:
+            nop_count += 1
 
         classification, line, site, game_result = "-", None, "-", "-"
         if game:
@@ -267,7 +271,7 @@ def get_player_season_details_cached(player_id, player_picks_by_player, games_by
             'type': classification
         })
 
-    return weekly_data, fav_count, dog_count, pickem_count
+    return weekly_data, fav_count, dog_count, pickem_count, nop_count
 
 
 def emit_emails_sent_metric(week, emails_sent_count, request_type=None, year=None):
@@ -600,7 +604,8 @@ def lambda_handler(event, context):
     if field_pickem_picks > 0:
         field_picks_parts.append("{} pick em".format(field_pickem_picks))
     if field_nop_picks > 0:
-        field_picks_parts.append("{} NO PICK".format(field_nop_picks))
+        label = "no pick" if field_nop_picks == 1 else "no picks"
+        field_picks_parts.append("{} {}".format(field_nop_picks, label))
 
     field_picks_str = " / ".join(field_picks_parts) if field_picks_parts else "-"
 
@@ -680,7 +685,7 @@ def lambda_handler(event, context):
         logger.info("Building pick report for player {}".format(player_id))
         message += '<br><h3 style="text-align: left;">Your picks:</h3>\n'
 
-        weekly_data, season_fav, season_dog, season_pickem = get_player_season_details_cached(
+        weekly_data, season_fav, season_dog, season_pickem, season_nop = get_player_season_details_cached(
             player_id, player_picks_by_player, games_by_week_team
         )
 
@@ -700,9 +705,23 @@ def lambda_handler(event, context):
         season_total = season_wins + season_losses
         season_pct = (season_wins / season_total * 100) if season_total > 0 else 0.0
 
+        # Build player tendencies string omitting zeros
+        tendencies_parts = []
+        if season_fav > 0:
+            tendencies_parts.append("{} favorites".format(season_fav))
+        if season_dog > 0:
+            tendencies_parts.append("{} underdogs".format(season_dog))
+        if season_pickem > 0:
+            tendencies_parts.append("{} pick em".format(season_pickem))
+        if season_nop > 0:
+            label = "no pick" if season_nop == 1 else "no picks"
+            tendencies_parts.append("{} {}".format(season_nop, label))
+
+        tendencies_str = " / ".join(tendencies_parts) if tendencies_parts else "-"
+
         message += "<b>Record:</b> {}-{} ({:.1f}%) ({} ATS Points)<br>".format(season_wins, season_losses, season_pct, season_ats)
         message += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
-        message += "<b>Tendencies:</b> {} Favorites / {} Underdogs / {} Pick &apos;em<br><br>".format(season_fav, season_dog, season_pickem)
+        message += "<b>Tendencies:</b> {}<br><br>".format(tendencies_str)
 
         cell_style = "border: 1px solid black; padding: 6px; text-align: left;"
         message += """
