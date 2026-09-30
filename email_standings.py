@@ -528,7 +528,13 @@ def lambda_handler(event, context):
     dog_wins = 0
     dog_losses = 0
 
+    # Build lookup for team spreads this week to format team picks with LOTW line
+    team_line_map = {}
     for h_id, a_id, h_line, a_score, h_score in weekly_games:
+        if h_line is not None:
+            team_line_map[h_id] = h_line
+            team_line_map[a_id] = -h_line
+
         if h_line is not None and a_score is not None and h_score is not None and h_line != 0:
             if h_line < 0:
                 fav_ats = h_line + (h_score - a_score)
@@ -553,6 +559,12 @@ def lambda_handler(event, context):
     dog_total = dog_wins + dog_losses
     dog_pct = (dog_wins / dog_total * 100) if dog_total > 0 else 0.0
 
+    def format_team_with_line(team):
+        line = team_line_map.get(team)
+        if line is not None:
+            return f"{team} {formatted_line(line)}"
+        return team
+
     winning_picks = {team: count for team, count in pick_counts.items() if pick_ats_map[team] > 0}
     losing_picks = {team: count for team, count in pick_counts.items() if pick_ats_map[team] <= 0}
 
@@ -560,7 +572,7 @@ def lambda_handler(event, context):
         if not picks_dict:
             return "-"
         max_count = max(picks_dict.values())
-        top_teams = [team for team, count in picks_dict.items() if count == max_count]
+        top_teams = [format_team_with_line(team) for team, count in picks_dict.items() if count == max_count]
         return "{} ({} picks)".format(", ".join(top_teams), max_count)
 
     most_picked_win = get_most_picked(winning_picks)
@@ -568,12 +580,12 @@ def lambda_handler(event, context):
 
     if pick_ats_map:
         max_ats = max(pick_ats_map.values())
-        best_teams = [team for team, ats in pick_ats_map.items() if ats == max_ats]
+        best_teams = [format_team_with_line(team) for team, ats in pick_ats_map.items() if ats == max_ats]
         best_ats_str = "+{}".format(max_ats) if max_ats > 0 else str(max_ats)
         best_pick_str = "{} ({} ATS Points)".format(", ".join(best_teams), best_ats_str)
 
         min_ats = min(pick_ats_map.values())
-        worst_teams = [team for team, ats in pick_ats_map.items() if ats == min_ats]
+        worst_teams = [format_team_with_line(team) for team, ats in pick_ats_map.items() if ats == min_ats]
         worst_ats_str = "+{}".format(min_ats) if min_ats > 0 else str(min_ats)
         worst_pick_str = "{} ({} ATS Points)".format(", ".join(worst_teams), worst_ats_str)
     else:
