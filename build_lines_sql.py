@@ -70,7 +70,6 @@ def parse_nflverse_kickoff(row):
     start_time_raw = row.get('start_time', '').strip()
     if start_time_raw:
         try:
-            # Handles ISO format, e.g., '2024-09-08T17:00:00Z'
             dt = datetime.datetime.fromisoformat(start_time_raw.replace('Z', '+00:00'))
             return dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
         except Exception:
@@ -81,7 +80,6 @@ def parse_nflverse_kickoff(row):
 
     if gameday_raw and gametime_raw:
         try:
-            # gametime in nflverse is US/Eastern time (e.g., '13:00' or '20:15')
             et_str = f"{gameday_raw} {gametime_raw}"
             et_dt = datetime.datetime.strptime(et_str, "%Y-%m-%d %H:%M")
             et_localized = et_dt.replace(tzinfo=ZoneInfo("America/New_York"))
@@ -100,7 +98,7 @@ def fetch_nflverse_game_data(target_year, target_week):
         kickoff_map: { (away_team_id, home_team_id): kickoff_datetime_utc }
     """
     url = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"
-    logger.info("Fetching game data from nflverse: %s", url)
+    logger.info("Fetching game data feed from nflverse: %s", url)
 
     req = urllib.request.Request(
         url,
@@ -110,6 +108,7 @@ def fetch_nflverse_game_data(target_year, target_week):
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             lines = resp.read().decode('utf-8').splitlines()
+        logger.info("Successfully downloaded %d lines from nflverse", len(lines))
     except Exception as e:
         logger.error("Failed to download data from nflverse: %s", str(e))
         return {}, {}
@@ -139,6 +138,9 @@ def fetch_nflverse_game_data(target_year, target_week):
         actual_kickoff = parse_nflverse_kickoff(row)
         if actual_kickoff is not None:
             kickoff_map[(away_id, home_id)] = actual_kickoff
+            logger.info("Parsed nflverse schedule: %s @ %s -> Kickoff %s UTC", away_id, home_id, actual_kickoff)
+        else:
+            logger.warning("Could not resolve kickoff time from feed for %s @ %s", away_id, home_id)
 
         # Parse and record spread line
         if raw_spread:
@@ -147,10 +149,14 @@ def fetch_nflverse_game_data(target_year, target_week):
                 int_line = normalize_line_to_integer(home_team_spread)
                 spreads_map[(away_id, home_id)] = int_line
                 spreads_map[home_id] = int_line
+                logger.info("Parsed spread for %s @ %s: raw=%s -> home_line=%s", away_id, home_id, raw_spread, int_line)
             except ValueError:
                 continue
 
-    logger.info("Parsed %d game spreads and %d kickoff schedules for week %s", len(spreads_map) // 2, len(kickoff_map), target_week)
+    logger.info(
+        "Feed parsing complete for Season %s, Week %s: %d game spreads and %d kickoff schedules indexed",
+        target_year, target_week, len(spreads_map) // 2, len(kickoff_map)
+    )
     return spreads_map, kickoff_map
 
 
@@ -161,16 +167,21 @@ def generate_sql_lines(conn, week):
     """
     year = get_current_year()
     table_name = f"Games_{year}"
+    logger.info("Generating SQL lines for table: %s (Week %s)", table_name, week)
 
     spreads_map, kickoff_map = fetch_nflverse_game_data(year, week)
     games = get_all_games(conn, week)
 
     if not games:
-        logger.warning("No games found for week %s", week)
+        logger.warning("No games found in database table %s for week %s", table_name, week)
         return ""
+
+    logger.info("Retrieved %d games from database table %s for week %s", len(games), table_name, week)
 
     schedule_discrepancies = []
     sql_output = ""
+    lines_found_count = 0
+    lines_missing_count = 0
 
     for game in games:
         # Schema: (game_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, ...)
@@ -179,10 +190,12 @@ def generate_sql_lines(conn, week):
         away_team_id = game[3]
         home_team_id = game[4]
 
+        matchup_key = (away_team_id, home_team_id)
+        logger.info("Validating Game ID %s: %s @ %s", game_id, away_team_id, home_team_id)
+
         # Verify kickoff schedule against actual NFL schedule
-        actual_kickoff = kickoff_map.get((away_team_id, home_team_id))
+        actual_kickoff = kickoff_map.get(matchup_key)
         if actual_kickoff is not None and db_kickoff is not None:
-            # Allow up to 60s difference for second-rounding variations
             time_delta = abs((db_kickoff - actual_kickoff).total_seconds())
             if time_delta > 60:
                 err_detail = (
@@ -192,24 +205,46 @@ def generate_sql_lines(conn, week):
                 )
                 logger.error("Schedule mismatch: %s", err_detail)
                 schedule_discrepancies.append(err_detail)
+            else:
+                logger.info(
+                    "Kickoff time check PASSED for %s @ %s (LOTW DB: %s UTC, NFL schedule: %s UTC)",
+                    away_team_id, home_team_id, db_kickoff, actual_kickoff
+                )
+        elif actual_kickoff is None:
+            logger.warning("No schedule kickoff found in nflverse feed for %s @ %s to compare against DB", away_team_id, home_team_id)
+        elif db_kickoff is None:
+            logger.warning("Database has NULL kickoff_time for game_id %s (%s @ %s)", game_id, away_team_id, home_team_id)
 
         # Match line by (away, home) pair or by home team ID
-        line = spreads_map.get((away_team_id, home_team_id), spreads_map.get(home_team_id))
+        line = spreads_map.get(matchup_key, spreads_map.get(home_team_id))
         line_str = str(line) if line is not None else ""
 
-        # Format: UPDATE Games_YYYY SET home_team_line = -3 WHERE game_id = 123 AND away_team_id = 'KC' AND home_team_id = 'DEN';
+        if line is not None:
+            lines_found_count += 1
+            logger.info("Assigned home line %s to %s @ %s (game_id %s)", line, away_team_id, home_team_id, game_id)
+        else:
+            lines_missing_count += 1
+            logger.warning("No spread line found for %s @ %s (game_id %s) in feed; field will be cleared/empty", away_team_id, home_team_id, game_id)
+
         sql_line = (
             f"UPDATE {table_name} SET home_team_line = {line_str} "
             f"WHERE game_id = {game_id} AND away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}';"
         )
         sql_output += sql_line + "<br>"
 
+    logger.info(
+        "SQL generation summary for week %s: %d games processed (%d lines assigned, %d lines missing)",
+        week, len(games), lines_found_count, lines_missing_count
+    )
+
     if schedule_discrepancies:
         discrepancy_details = " | ".join(schedule_discrepancies)
+        logger.error("Aborting SQL generation due to %d schedule discrepancy(ies)", len(schedule_discrepancies))
         raise RuntimeError(
             f"Schedule mismatch detected for week {week}! Games may have been flexed: {discrepancy_details}"
         )
 
+    logger.info("All kickoff schedule checks passed successfully for week %s.", week)
     return sql_output
 
 
@@ -222,6 +257,7 @@ def lambda_handler(event, context):
     request_type = event.get('detail-type')
     if request_type is None:
         request_type = event.get('requestContext', {}).get('stage', 'manual_run')
+    logger.info("Request type determined as: %s", request_type)
 
     try:
         conn = get_db_connection()
@@ -238,7 +274,7 @@ def lambda_handler(event, context):
         week = query_string_params.get('week')
 
     if week is None:
-        logger.info("No 'week' in env or params, attempting to get current week.")
+        logger.info("No 'week' in env or params, attempting to get current week from DB.")
         week = get_current_week(conn)
     else:
         week = int(week)
@@ -248,7 +284,7 @@ def lambda_handler(event, context):
         conn.close()
         return response(400, 'text/plain', "Error: Unable to determine week.")
 
-    logger.info("Generating SQL for week %s", week)
+    logger.info("Starting SQL lines build for week %s", week)
 
     try:
         sql_content = generate_sql_lines(conn, week)
@@ -260,6 +296,7 @@ def lambda_handler(event, context):
         return response(500, 'text/plain', f"Error generating SQL: {str(e)}")
 
     conn.close()
+    logger.info("Database connection closed. SQL generation completed successfully for week %s.", week)
 
     sql_html = f"<html><body>{sql_content}</body></html>"
     return response(200, 'text/html', sql_html)
