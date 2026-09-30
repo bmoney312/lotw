@@ -559,6 +559,51 @@ def lambda_handler(event, context):
     dog_total = dog_wins + dog_losses
     dog_pct = (dog_wins / dog_total * 100) if dog_total > 0 else 0.0
 
+    # Field picks breakdown across all players in standings
+    field_fav_picks = 0
+    field_dog_picks = 0
+    field_pickem_picks = 0
+    field_nop_picks = 0
+
+    for s_player in standings:
+        s_pid = s_player[0]
+        p_data = picks_map.get(s_pid, ("NOP", None, None, False))
+        p_team = p_data[0]
+        p_line = p_data[1]
+
+        if p_team == "NOP" or p_team is None:
+            field_nop_picks += 1
+        elif p_line is not None:
+            if p_line < 0:
+                field_fav_picks += 1
+            elif p_line > 0:
+                field_dog_picks += 1
+            else:
+                field_pickem_picks += 1
+        else:
+            t_line = team_line_map.get(p_team)
+            if t_line is not None:
+                if t_line < 0:
+                    field_fav_picks += 1
+                elif t_line > 0:
+                    field_dog_picks += 1
+                else:
+                    field_pickem_picks += 1
+            else:
+                field_nop_picks += 1
+
+    field_picks_parts = []
+    if field_fav_picks > 0:
+        field_picks_parts.append("{} favorites".format(field_fav_picks))
+    if field_dog_picks > 0:
+        field_picks_parts.append("{} underdogs".format(field_dog_picks))
+    if field_pickem_picks > 0:
+        field_picks_parts.append("{} pick em".format(field_pickem_picks))
+    if field_nop_picks > 0:
+        field_picks_parts.append("{} NO PICK".format(field_nop_picks))
+
+    field_picks_str = " / ".join(field_picks_parts) if field_picks_parts else "-"
+
     def format_team_with_line(team):
         line = team_line_map.get(team)
         if line is not None:
@@ -594,6 +639,7 @@ def lambda_handler(event, context):
 
     trends_html = '<h3 style="text-align: left;">Trends this week:</h3>\n'
     trends_html += "<b>Field record:</b> {}-{} ({:.1f}%)<br>\n".format(field_wins, field_losses, field_pct)
+    trends_html += "<b>Field picks:</b> {}<br>\n".format(field_picks_str)
     trends_html += "<b>Favorites:</b> {}-{} ({:.1f}%)<br>\n".format(fav_wins, fav_losses, fav_pct)
     trends_html += "<b>Underdogs:</b> {}-{} ({:.1f}%)<br>\n".format(dog_wins, dog_losses, dog_pct)
     trends_html += "<b>Most picked win:</b> {}<br>\n".format(most_picked_win)
