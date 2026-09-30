@@ -602,7 +602,7 @@ def lambda_handler(event, context):
     if field_dog_picks > 0:
         field_picks_parts.append("{} underdogs".format(field_dog_picks))
     if field_pickem_picks > 0:
-        field_picks_parts.append("{} pick em".format(field_pickem_picks))
+        field_picks_parts.append("{} pick &apos;em".format(field_pickem_picks))
     if field_nop_picks > 0:
         label = "no pick" if field_nop_picks == 1 else "no picks"
         field_picks_parts.append("{} {}".format(field_nop_picks, label))
@@ -705,19 +705,11 @@ def lambda_handler(event, context):
         season_total = season_wins + season_losses
         season_pct = (season_wins / season_total * 100) if season_total > 0 else 0.0
 
-        # Build player tendencies string omitting zeros
-        tendencies_parts = []
-        if season_fav > 0:
-            tendencies_parts.append("{} favorites".format(season_fav))
-        if season_dog > 0:
-            tendencies_parts.append("{} underdogs".format(season_dog))
-        if season_pickem > 0:
-            tendencies_parts.append("{} pick em".format(season_pickem))
-        if season_nop > 0:
-            label = "no pick" if season_nop == 1 else "no picks"
-            tendencies_parts.append("{} {}".format(season_nop, label))
-
-        tendencies_str = " / ".join(tendencies_parts) if tendencies_parts else "-"
+        # Always show all four categories, even if zero
+        nop_label = "no pick" if season_nop == 1 else "no picks"
+        tendencies_str = "{} favorites / {} underdogs / {} pick &apos;em / {} {}".format(
+            season_fav, season_dog, season_pickem, season_nop, nop_label
+        )
 
         message += "<b>Record:</b> {}-{} ({:.1f}%) ({} ATS Points)<br>".format(season_wins, season_losses, season_pct, season_ats)
         message += "<b>Current Rank:</b> {} of {}<br>".format(rank, total_players_season)
