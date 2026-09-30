@@ -4,6 +4,8 @@ import csv
 import json
 import logging
 import urllib.request
+import datetime
+from zoneinfo import ZoneInfo
 from lotw import get_db_connection, get_current_week, get_current_year, get_all_games, response
 
 # Global variables
@@ -60,13 +62,45 @@ def normalize_line_to_integer(raw_home_line):
     return sign * int(abs_line)
 
 
-def fetch_nflverse_spreads(target_year, target_week):
+def parse_nflverse_kickoff(row):
     """
-    Fetches game spread lines from the open nflverse CSV feed.
-    Returns a dictionary: { (away_team_id, home_team_id): home_team_line_int, home_team_id: home_team_line_int }
+    Parses kickoff timestamp from nflverse row into a UTC naive datetime.
+    Supports either 'start_time' or combined 'gameday' + 'gametime' (ET).
+    """
+    start_time_raw = row.get('start_time', '').strip()
+    if start_time_raw:
+        try:
+            # Handles ISO format, e.g., '2024-09-08T17:00:00Z'
+            dt = datetime.datetime.fromisoformat(start_time_raw.replace('Z', '+00:00'))
+            return dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        except Exception:
+            pass
+
+    gameday_raw = row.get('gameday', '').strip()
+    gametime_raw = row.get('gametime', '').strip()
+
+    if gameday_raw and gametime_raw:
+        try:
+            # gametime in nflverse is US/Eastern time (e.g., '13:00' or '20:15')
+            et_str = f"{gameday_raw} {gametime_raw}"
+            et_dt = datetime.datetime.strptime(et_str, "%Y-%m-%d %H:%M")
+            et_localized = et_dt.replace(tzinfo=ZoneInfo("America/New_York"))
+            return et_localized.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        except Exception as e:
+            logger.warning("Could not parse kickoff from gameday/gametime (%s %s): %s", gameday_raw, gametime_raw, str(e))
+
+    return None
+
+
+def fetch_nflverse_game_data(target_year, target_week):
+    """
+    Fetches game spreads and kickoff times from the open nflverse CSV feed.
+    Returns:
+        spreads_map: { (away_team_id, home_team_id): home_team_line_int, home_team_id: home_team_line_int }
+        kickoff_map: { (away_team_id, home_team_id): kickoff_datetime_utc }
     """
     url = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"
-    logger.info("Fetching lines from nflverse: %s", url)
+    logger.info("Fetching game data from nflverse: %s", url)
 
     req = urllib.request.Request(
         url,
@@ -77,11 +111,12 @@ def fetch_nflverse_spreads(target_year, target_week):
         with urllib.request.urlopen(req, timeout=15) as resp:
             lines = resp.read().decode('utf-8').splitlines()
     except Exception as e:
-        logger.error("Failed to download lines from nflverse: %s", str(e))
-        return {}
+        logger.error("Failed to download data from nflverse: %s", str(e))
+        return {}, {}
 
     reader = csv.DictReader(lines)
     spreads_map = {}
+    kickoff_map = {}
 
     for row in reader:
         try:
@@ -100,9 +135,13 @@ def fetch_nflverse_spreads(target_year, target_week):
         away_id = NFLVERSE_TO_LOTW_TEAM_MAP.get(away_raw, away_raw)
         home_id = NFLVERSE_TO_LOTW_TEAM_MAP.get(home_raw, home_raw)
 
+        # Parse and record kickoff schedule
+        actual_kickoff = parse_nflverse_kickoff(row)
+        if actual_kickoff is not None:
+            kickoff_map[(away_id, home_id)] = actual_kickoff
+
+        # Parse and record spread line
         if raw_spread:
-            # In nflverse: positive spread_line means home favored by X -> home_line = -X
-            # negative spread_line means away favored by X -> home_line = +X
             try:
                 home_team_spread = -float(raw_spread)
                 int_line = normalize_line_to_integer(home_team_spread)
@@ -111,32 +150,50 @@ def fetch_nflverse_spreads(target_year, target_week):
             except ValueError:
                 continue
 
-    logger.info("Parsed %d game spreads for week %s", len(spreads_map) // 2, target_week)
-    return spreads_map
+    logger.info("Parsed %d game spreads and %d kickoff schedules for week %s", len(spreads_map) // 2, len(kickoff_map), target_week)
+    return spreads_map, kickoff_map
 
 
 def generate_sql_lines(conn, week):
     """
     Generate SQL UPDATE statements for the given week with spreads filled in.
+    Raises an error if the kickoff schedule differs between LOTW and the actual schedule.
     """
     year = get_current_year()
     table_name = f"Games_{year}"
 
-    spreads_map = fetch_nflverse_spreads(year, week)
+    spreads_map, kickoff_map = fetch_nflverse_game_data(year, week)
     games = get_all_games(conn, week)
 
     if not games:
         logger.warning("No games found for week %s", week)
         return ""
 
+    schedule_discrepancies = []
     sql_output = ""
 
     for game in games:
+        # Schema: (game_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, ...)
         game_id = game[0]
+        db_kickoff = game[2]
         away_team_id = game[3]
         home_team_id = game[4]
 
-        # Match by (away, home) pair or by home team ID
+        # Verify kickoff schedule against actual NFL schedule
+        actual_kickoff = kickoff_map.get((away_team_id, home_team_id))
+        if actual_kickoff is not None and db_kickoff is not None:
+            # Allow up to 60s difference for second-rounding variations
+            time_delta = abs((db_kickoff - actual_kickoff).total_seconds())
+            if time_delta > 60:
+                err_detail = (
+                    f"Game {away_team_id} @ {home_team_id} (game_id {game_id}): "
+                    f"LOTW DB scheduled kickoff is {db_kickoff} UTC, "
+                    f"but actual NFL kickoff is {actual_kickoff} UTC."
+                )
+                logger.error("Schedule mismatch: %s", err_detail)
+                schedule_discrepancies.append(err_detail)
+
+        # Match line by (away, home) pair or by home team ID
         line = spreads_map.get((away_team_id, home_team_id), spreads_map.get(home_team_id))
         line_str = str(line) if line is not None else ""
 
@@ -146,6 +203,12 @@ def generate_sql_lines(conn, week):
             f"WHERE game_id = {game_id} AND away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}';"
         )
         sql_output += sql_line + "<br>"
+
+    if schedule_discrepancies:
+        discrepancy_details = " | ".join(schedule_discrepancies)
+        raise RuntimeError(
+            f"Schedule mismatch detected for week {week}! Games may have been flexed: {discrepancy_details}"
+        )
 
     return sql_output
 
