@@ -86,22 +86,13 @@ def build_standings_email_head():
     return html
 
 
-def get_standings_html(week, standings, current_player_id, picks_map):
+def build_standings_table_html(week, standings_list, current_player_id, picks_map, header_title):
     """
-    Return string of LOTW standings in centered HTML table with left-justified header
+    Reusable builder for rendering a standings table with a customizable header title.
     """
-    if week == 19:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (WILDCARD WEEKEND)</h3>\n'.format(week)
-    elif week == 20:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (DIVISIONAL PLAYOFFS)</h3>\n'.format(week)
-    elif week == 21:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (CONFERENCE CHAMPIONSHIPS)</h3>\n'.format(week)
-    elif week == 22:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS (SUPER BOWL)</h3>\n'.format(week)
-    else:
-        html = '<br><br><h3 style="text-align: left;">LOTW: WEEK {} STANDINGS</h3>\n'.format(week)
+    html = f'<br><br><h3 style="text-align: left;">{header_title}</h3>\n'
 
-    html += """
+    html += f"""
 <table class="email-table" role="presentation" border="1" cellpadding="6" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: collapse; width: 100%;">
 <tr>
     <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Rank</th>
@@ -111,21 +102,19 @@ def get_standings_html(week, standings, current_player_id, picks_map):
     <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Win %</th>
     <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">ATS Points</th>
     <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Streak</th>
-    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {} Pick</th>
-    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {} Result</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {week} Pick</th>
+    <th style="background-color: lightgrey; border: 1px solid black; padding: 6px; text-align: left;">Week {week} Result</th>
 </tr>
-""".format(week, week)
+"""
 
     rank = 1
-    for row in standings:
+    for row in standings_list:
         (player_id, last_name, first_name, past_titles, rookie, wins, losses, win_percentage, ats_points, streak) = row
         full_name = get_standings_full_name(first_name, last_name, past_titles, rookie)
         pick_data = picks_map.get(player_id, ("NOP", None, None, False))
         (pick, line, pick_ats, locked_in) = pick_data
 
-        highlight_row = False
-        if player_id == current_player_id:
-            highlight_row = True
+        highlight_row = (player_id == current_player_id)
 
         if pick == "NOP" and pick_ats is None:
             pick_ats = 0
@@ -157,7 +146,26 @@ def get_standings_html(week, standings, current_player_id, picks_map):
         html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, streak, pick_as_string, result, highlight_row)
         rank += 1
 
-    html += "</table>"
+    html += "</table>\n"
+    return html
+
+
+def get_standings_html(week, standings, current_player_id, picks_map):
+    """
+    Return string of LOTW main standings in centered HTML table with left-justified header
+    """
+    if week == 19:
+        header_title = f"LOTW: WEEK {week} STANDINGS (WILDCARD WEEKEND)"
+    elif week == 20:
+        header_title = f"LOTW: WEEK {week} STANDINGS (DIVISIONAL PLAYOFFS)"
+    elif week == 21:
+        header_title = f"LOTW: WEEK {week} STANDINGS (CONFERENCE CHAMPIONSHIPS)"
+    elif week == 22:
+        header_title = f"LOTW: WEEK {week} STANDINGS (SUPER BOWL)"
+    else:
+        header_title = f"LOTW: WEEK {week} STANDINGS"
+
+    html = build_standings_table_html(week, standings, current_player_id, picks_map, header_title)
     html += """
           </td>
         </tr>
@@ -168,6 +176,14 @@ def get_standings_html(week, standings, current_player_id, picks_map):
 </table>
 </body></html>"""
     return html
+
+
+def get_league_standings_html(week, league_name, league_standings, current_player_id, picks_map):
+    """
+    Return HTML table for a specific sub-league's standings.
+    """
+    header_title = f"LOTW: {league_name} League Standings"
+    return build_standings_table_html(week, league_standings, current_player_id, picks_map, header_title)
 
 
 def build_standings_html_row(rank, full_name, wins, losses, win_percentage, ats_points, streak, pick_as_string, result, highlight_row):
@@ -511,6 +527,30 @@ def lambda_handler(event, context):
                 player_picks_by_player[pid] = []
             player_picks_by_player[pid].append((p_week, p_pick, p_ats))
 
+    # --- Pre-fetch League Memberships ---
+    leagues_meta = {}          # league_id -> league_name
+    league_members_set = {}    # league_id -> set(player_ids)
+    player_leagues_map = {}    # player_id -> list of (league_id, league_name)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT league_id, league_name FROM Leagues")
+            for lid, lname in cur.fetchall():
+                leagues_meta[lid] = lname
+                league_members_set[lid] = set()
+
+            cur.execute("SELECT league_id, player_id FROM League_Members")
+            for lid, pid in cur.fetchall():
+                if lid in league_members_set:
+                    league_members_set[lid].add(pid)
+                if lid != 1:  # Exclude Main Event league (ID 1)
+                    if pid not in player_leagues_map:
+                        player_leagues_map[pid] = []
+                    lname = leagues_meta.get(lid, f"League {lid}")
+                    player_leagues_map[pid].append((lid, lname))
+    except Exception as e:
+        logger.warning("Could not pre-fetch league tables: %s", str(e))
+
     # --- Calculate Weekly Trends ---
     field_wins = 0
     pick_counts = {}
@@ -750,8 +790,20 @@ def lambda_handler(event, context):
             )
         message += "</table><br>\n"
 
-        standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
-        mail_body = build_standings_email_head() + "\n" + message + standings_html
+        # Build sub-league standings if the player belongs to any
+        league_standings_html = ""
+        player_leagues = player_leagues_map.get(player_id, [])
+        for lid, lname in player_leagues:
+            members_in_league = league_members_set.get(lid, set())
+            # Filter main standings list keeping the pre-calculated sort order
+            sub_league_standings = [row for row in standings if row[0] in members_in_league]
+            if sub_league_standings:
+                league_standings_html += get_league_standings_html(
+                    standings_week, lname, sub_league_standings, player_id, picks_map
+                )
+
+        main_standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
+        mail_body = build_standings_email_head() + "\n" + message + league_standings_html + main_standings_html
         mail_to = (player_email, 'bmoney312@gmail.com')
 
         # Subject line logic
