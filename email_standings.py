@@ -155,15 +155,15 @@ def get_standings_html(week, standings, current_player_id, picks_map):
     Return string of LOTW main standings in centered HTML table with left-justified header
     """
     if week == 19:
-        header_title = f"LOTW: WEEK {week} STANDINGS (WILDCARD WEEKEND)"
+        header_title = f"Main Event League: Week {week} Standings (Wildcard Weekend)"
     elif week == 20:
-        header_title = f"LOTW: WEEK {week} STANDINGS (DIVISIONAL PLAYOFFS)"
+        header_title = f"Main Event League: Week {week} Standings (Divisional Round)"
     elif week == 21:
-        header_title = f"LOTW: WEEK {week} STANDINGS (CONFERENCE CHAMPIONSHIPS)"
+        header_title = f"Main Event League: Week {week} Standings (Conference Championships)"
     elif week == 22:
-        header_title = f"LOTW: WEEK {week} STANDINGS (SUPER BOWL)"
+        header_title = f"Main Event League: Week {week} Standings (Super Bowl)"
     else:
-        header_title = f"LOTW: WEEK {week} STANDINGS"
+        header_title = f"Main Event League: Week {week} Standings"
 
     html = build_standings_table_html(week, standings, current_player_id, picks_map, header_title)
     html += """
