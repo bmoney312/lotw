@@ -146,7 +146,7 @@ def build_standings_table_html(week, standings_list, current_player_id, picks_ma
         html += build_standings_html_row(rank, full_name, wins, losses, win_percentage_string, ats_points, streak, pick_as_string, result, highlight_row)
         rank += 1
 
-    html += "</table>\n"
+    html += "</table><br>\n"
     return html
 
 
@@ -182,7 +182,7 @@ def get_league_standings_html(week, league_name, league_standings, current_playe
     """
     Return HTML table for a specific sub-league's standings.
     """
-    header_title = f"LOTW: {league_name} League Standings"
+    header_title = f"{league_name} League Standings"
     return build_standings_table_html(week, league_standings, current_player_id, picks_map, header_title)
 
 
