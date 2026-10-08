@@ -528,21 +528,26 @@ def lambda_handler(event, context):
             player_picks_by_player[pid].append((p_week, p_pick, p_ats))
 
     # --- Pre-fetch League Memberships ---
-    leagues_meta = {}          # league_id -> league_name
-    league_members_set = {}    # league_id -> set(player_ids)
-    player_leagues_map = {}    # player_id -> list of (league_id, league_name)
+    leagues_meta = {}          # league_id (int) -> league_name
+    league_members_set = {}    # league_id (int) -> set(player_ids as int)
+    player_leagues_map = {}    # player_id (int) -> list of (league_id, league_name)
 
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT league_id, league_name FROM Leagues")
-            for lid, lname in cur.fetchall():
+            for raw_lid, lname in cur.fetchall():
+                lid = int(raw_lid)
                 leagues_meta[lid] = lname
                 league_members_set[lid] = set()
 
             cur.execute("SELECT league_id, player_id FROM League_Members")
-            for lid, pid in cur.fetchall():
+            for raw_lid, raw_pid in cur.fetchall():
+                lid = int(raw_lid)
+                pid = int(raw_pid)
+
                 if lid in league_members_set:
                     league_members_set[lid].add(pid)
+
                 if lid != 1:  # Exclude Main Event league (ID 1)
                     if pid not in player_leagues_map:
                         player_leagues_map[pid] = []
@@ -792,11 +797,10 @@ def lambda_handler(event, context):
 
         # Build sub-league standings if the player belongs to any
         league_standings_html = ""
-        player_leagues = player_leagues_map.get(player_id, [])
+        player_leagues = player_leagues_map.get(int(player_id), [])
         for lid, lname in player_leagues:
             members_in_league = league_members_set.get(lid, set())
-            # Filter main standings list keeping the pre-calculated sort order
-            sub_league_standings = [row for row in standings if row[0] in members_in_league]
+            sub_league_standings = [row for row in standings if int(row[0]) in members_in_league]
             if sub_league_standings:
                 league_standings_html += get_league_standings_html(
                     standings_week, lname, sub_league_standings, player_id, picks_map
