@@ -18,6 +18,7 @@ env:
     add_lotw_player
     build_lines_sql
     build_results_sql
+    create_league
     email_analytics
     email_league
     email_lines
