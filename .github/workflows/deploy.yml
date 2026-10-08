@@ -16,6 +16,7 @@ env:
   # List all 15 Lambda function names separated by space
   LAMBDA_FUNCTIONS: >-
     add_lotw_player
+    add_player_to_league
     build_lines_sql
     build_results_sql
     create_league
@@ -30,6 +31,8 @@ env:
     lambda_warmer
     process_pick
     process_registration
+    remove_league
+    remove_player_from_league
     submit_pick
     update_payment_status
     update_standings
