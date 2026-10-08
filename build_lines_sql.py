@@ -163,7 +163,7 @@ def fetch_nflverse_game_data(target_year, target_week):
 def generate_sql_lines(conn, week):
     """
     Generate SQL UPDATE statements for the given week with spreads filled in.
-    Raises an error if the kickoff schedule differs between LOTW and the actual schedule.
+    Logs warnings on kickoff schedule mismatches and generates SQL to update the schedule.
     """
     year = get_current_year()
     table_name = f"Games_{year}"
@@ -178,10 +178,10 @@ def generate_sql_lines(conn, week):
 
     logger.info("Retrieved %d games from database table %s for week %s", len(games), table_name, week)
 
-    schedule_discrepancies = []
     sql_output = ""
     lines_found_count = 0
     lines_missing_count = 0
+    schedule_fix_statements = []
 
     for game in games:
         # Schema: (game_id, week, kickoff_time, away_team_id, home_team_id, home_team_line, ...)
@@ -198,13 +198,17 @@ def generate_sql_lines(conn, week):
         if actual_kickoff is not None and db_kickoff is not None:
             time_delta = abs((db_kickoff - actual_kickoff).total_seconds())
             if time_delta > 60:
-                err_detail = (
-                    f"Game {away_team_id} @ {home_team_id} (game_id {game_id}): "
-                    f"LOTW DB scheduled kickoff is {db_kickoff} UTC, "
-                    f"but actual NFL kickoff is {actual_kickoff} UTC."
+                actual_kickoff_str = actual_kickoff.strftime("%Y-%m-%d %H:%M:%S")
+                logger.warning(
+                    "SCHEDULE WARNING: Game ID %s (%s @ %s) kickoff mismatch! "
+                    "DB has %s UTC, but actual schedule is %s UTC (flexed/rescheduled).",
+                    game_id, away_team_id, home_team_id, db_kickoff, actual_kickoff
                 )
-                logger.error("Schedule mismatch: %s", err_detail)
-                schedule_discrepancies.append(err_detail)
+                fix_sql = (
+                    f"UPDATE {table_name} SET kickoff_time = '{actual_kickoff_str}' "
+                    f"WHERE game_id = {game_id} AND away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}';"
+                )
+                schedule_fix_statements.append(fix_sql)
             else:
                 logger.info(
                     "Kickoff time check PASSED for %s @ %s (LOTW DB: %s UTC, NFL schedule: %s UTC)",
@@ -232,19 +236,21 @@ def generate_sql_lines(conn, week):
         )
         sql_output += sql_line + "<br>"
 
+    # Append schedule adjustment SQL statements if any discrepancies were found
+    if schedule_fix_statements:
+        logger.warning(
+            "Appending %d schedule fix statement(s) to output for week %s.",
+            len(schedule_fix_statements), week
+        )
+        sql_output += "<br>-- Schedule Mismatch Fix Statements (Flexed/Rescheduled Games):<br>"
+        for fix in schedule_fix_statements:
+            sql_output += fix + "<br>"
+
     logger.info(
-        "SQL generation summary for week %s: %d games processed (%d lines assigned, %d lines missing)",
-        week, len(games), lines_found_count, lines_missing_count
+        "SQL generation summary for week %s: %d games processed (%d lines assigned, %d lines missing, %d schedule fixes)",
+        week, len(games), lines_found_count, lines_missing_count, len(schedule_fix_statements)
     )
 
-    if schedule_discrepancies:
-        discrepancy_details = " | ".join(schedule_discrepancies)
-        logger.error("Aborting SQL generation due to %d schedule discrepancy(ies)", len(schedule_discrepancies))
-        raise RuntimeError(
-            f"Schedule mismatch detected for week {week}! Games may have been flexed: {discrepancy_details}"
-        )
-
-    logger.info("All kickoff schedule checks passed successfully for week %s.", week)
     return sql_output
 
 
