@@ -182,7 +182,7 @@ def get_league_standings_html(week, league_name, league_standings, current_playe
     """
     Return HTML table for a specific sub-league's standings.
     """
-    header_title = f"{league_name} League Standings"
+    header_title = f"{league_name} League: Week {week} Standings"
     return build_standings_table_html(week, league_standings, current_player_id, picks_map, header_title)
 
 
