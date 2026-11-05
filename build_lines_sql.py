@@ -274,6 +274,7 @@ def upload_sql_to_s3(bucket_name, s3_key, sql_content):
 def lambda_handler(event, context):
     """
     Generate a SQL file for updating game lines and upload to S3.
+    Returns the shell command required to copy the file to /tmp on an EC2 instance.
     """
     logger.info("Received event: %s", json.dumps(event, indent=2))
 
@@ -337,6 +338,14 @@ def lambda_handler(event, context):
     conn.close()
     logger.info("Database connection closed. Lines build and upload completed successfully.")
 
-    success_msg = f"Successfully generated and uploaded {s3_key} to s3://{S3_BUCKET_NAME}/"
+    # Shell command to pull from S3 to /tmp/week{X}_lines.sql on EC2
+    ec2_dest = f"/tmp/week{week}_lines.sql"
+    download_cmd = f"aws s3 cp s3://{S3_BUCKET_NAME}/{s3_key} {ec2_dest}"
+
+    success_msg = (
+        f"Successfully generated and uploaded s3://{S3_BUCKET_NAME}/{s3_key}\n\n"
+        f"Run this command on your EC2 instance to download:\n"
+        f"{download_cmd}"
+    )
     print(success_msg)
     return response(200, 'text/plain', success_msg)
