@@ -6,11 +6,16 @@ import logging
 import urllib.request
 import datetime
 from zoneinfo import ZoneInfo
+import boto3
+from botocore.exceptions import ClientError
 from lotw import get_db_connection, get_current_week, get_current_year, get_all_games, response
 
 # Global variables
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+S3_BUCKET_NAME = os.environ.get('s3_bucket', 'lotw-lines-062043405251-us-west-2-an')
+s3_client = boto3.client('s3')
 
 # Map nflverse team abbreviations to LOTW database team IDs
 NFLVERSE_TO_LOTW_TEAM_MAP = {
@@ -160,12 +165,11 @@ def fetch_nflverse_game_data(target_year, target_week):
     return spreads_map, kickoff_map
 
 
-def generate_sql_lines(conn, week):
+def generate_sql_lines(conn, week, year):
     """
-    Generate SQL UPDATE statements for the given week with spreads filled in.
-    Logs warnings on kickoff schedule mismatches and generates SQL to update the schedule.
+    Generate clean SQL UPDATE statements for the given week with spreads filled in.
+    Logs warnings on kickoff schedule mismatches and appends SQL to fix discrepancies.
     """
-    year = get_current_year()
     table_name = f"Games_{year}"
     logger.info("Generating SQL lines for table: %s (Week %s)", table_name, week)
 
@@ -178,7 +182,7 @@ def generate_sql_lines(conn, week):
 
     logger.info("Retrieved %d games from database table %s for week %s", len(games), table_name, week)
 
-    sql_output = ""
+    sql_statements = []
     lines_found_count = 0
     lines_missing_count = 0
     schedule_fix_statements = []
@@ -221,20 +225,20 @@ def generate_sql_lines(conn, week):
 
         # Match line by (away, home) pair or by home team ID
         line = spreads_map.get(matchup_key, spreads_map.get(home_team_id))
-        line_str = str(line) if line is not None else ""
+        line_val = str(line) if line is not None else "NULL"
 
         if line is not None:
             lines_found_count += 1
             logger.info("Assigned home line %s to %s @ %s (game_id %s)", line, away_team_id, home_team_id, game_id)
         else:
             lines_missing_count += 1
-            logger.warning("No spread line found for %s @ %s (game_id %s) in feed; field will be cleared/empty", away_team_id, home_team_id, game_id)
+            logger.warning("No spread line found for %s @ %s (game_id %s) in feed; field will be cleared/NULL", away_team_id, home_team_id, game_id)
 
         sql_line = (
-            f"UPDATE {table_name} SET home_team_line = {line_str} "
+            f"UPDATE {table_name} SET home_team_line = {line_val} "
             f"WHERE game_id = {game_id} AND away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}';"
         )
-        sql_output += sql_line + "<br>"
+        sql_statements.append(sql_line)
 
     # Append schedule adjustment SQL statements if any discrepancies were found
     if schedule_fix_statements:
@@ -242,21 +246,34 @@ def generate_sql_lines(conn, week):
             "Appending %d schedule fix statement(s) to output for week %s.",
             len(schedule_fix_statements), week
         )
-        sql_output += "<br>-- Schedule Mismatch Fix Statements (Flexed/Rescheduled Games):<br>"
-        for fix in schedule_fix_statements:
-            sql_output += fix + "<br>"
+        sql_statements.append("\n-- Schedule Mismatch Fix Statements (Flexed/Rescheduled Games):")
+        sql_statements.extend(schedule_fix_statements)
 
     logger.info(
         "SQL generation summary for week %s: %d games processed (%d lines assigned, %d lines missing, %d schedule fixes)",
         week, len(games), lines_found_count, lines_missing_count, len(schedule_fix_statements)
     )
 
-    return sql_output
+    return "\n".join(sql_statements) + "\n"
+
+
+def upload_sql_to_s3(bucket_name, s3_key, sql_content):
+    """
+    Uploads the raw SQL text content to the specified S3 bucket.
+    """
+    logger.info("Uploading %d bytes of SQL data to s3://%s/%s", len(sql_content.encode('utf-8')), bucket_name, s3_key)
+    s3_client.put_object(
+        Bucket=bucket_name,
+        Key=s3_key,
+        Body=sql_content.encode('utf-8'),
+        ContentType='application/sql'
+    )
+    logger.info("Successfully uploaded %s to S3 bucket %s", s3_key, bucket_name)
 
 
 def lambda_handler(event, context):
     """
-    Generate a SQL file for updating game lines.
+    Generate a SQL file for updating game lines and upload to S3.
     """
     logger.info("Received event: %s", json.dumps(event, indent=2))
 
@@ -288,21 +305,38 @@ def lambda_handler(event, context):
     if week is None:
         logger.error("ERROR: Unable to determine week!")
         conn.close()
-        return response(400, 'text/plain', "Error: Unable to determine week.")
+        msg = "Error: Unable to determine target week."
+        print(msg)
+        return response(400, 'text/plain', msg)
 
-    logger.info("Starting SQL lines build for week %s", week)
+    year = get_current_year()
+    logger.info("Starting SQL lines build for Year %s, Week %s", year, week)
 
     try:
-        sql_content = generate_sql_lines(conn, week)
-        if sql_content is None:
-            raise Exception("Failed to generate SQL lines.")
-    except Exception as e:
-        logger.error("Error generating SQL: %s", str(e))
+        sql_content = generate_sql_lines(conn, week, year)
+        if not sql_content.strip():
+            raise RuntimeError(f"No SQL statements were generated for week {week}.")
+
+        # Upload .sql file to S3
+        s3_key = f"lines_{year}_week_{week:02d}.sql"
+        upload_sql_to_s3(S3_BUCKET_NAME, s3_key, sql_content)
+
+    except ClientError as e:
+        error_msg = f"S3 Upload Error: {e.response['Error']['Message']}"
+        logger.error(error_msg)
         conn.close()
-        return response(500, 'text/plain', f"Error generating SQL: {str(e)}")
+        print(error_msg)
+        return response(500, 'text/plain', error_msg)
+    except Exception as e:
+        error_msg = f"Error during lines SQL generation/upload: {str(e)}"
+        logger.error(error_msg)
+        conn.close()
+        print(error_msg)
+        return response(500, 'text/plain', error_msg)
 
     conn.close()
-    logger.info("Database connection closed. SQL generation completed successfully for week %s.", week)
+    logger.info("Database connection closed. Lines build and upload completed successfully.")
 
-    sql_html = f"<html><body>{sql_content}</body></html>"
-    return response(200, 'text/html', sql_html)
+    success_msg = f"Successfully generated and uploaded {s3_key} to s3://{S3_BUCKET_NAME}/"
+    print(success_msg)
+    return response(200, 'text/plain', success_msg)
