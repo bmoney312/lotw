@@ -28,6 +28,7 @@ env:
     email_standings
     email_payment_reminder
     emit_lotw_metrics
+    get_league_members
     lambda_warmer
     process_pick
     process_registration
