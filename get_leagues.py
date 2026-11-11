@@ -39,12 +39,12 @@ def lambda_handler(event, context):
         logger.error("Database connection failure: %s", str(e))
         sys.exit()
 
-    # Left join League_Members to calculate member counts for each league
+    # Query leagues, owner player_id, and left-join member counts
     sql = """
-        SELECT l.league_id, l.league_name, l.description, COUNT(lm.player_id) AS members
+        SELECT l.league_id, l.league_name, l.league_owner, l.description, COUNT(lm.player_id) AS members
         FROM Leagues l
         LEFT JOIN League_Members lm ON l.league_id = lm.league_id
-        GROUP BY l.league_id, l.league_name, l.description
+        GROUP BY l.league_id, l.league_name, l.league_owner, l.description
         ORDER BY l.league_id ASC
     """
 
@@ -54,7 +54,7 @@ def lambda_handler(event, context):
 
     conn.close()
 
-    headers = ["league_id", "league_name", "description", "members"]
+    headers = ["league_id", "league_name", "league_owner", "description", "members"]
     table_str = format_ascii_table(headers, leagues)
 
     output = (
