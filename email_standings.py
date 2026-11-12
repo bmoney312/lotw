@@ -527,34 +527,37 @@ def lambda_handler(event, context):
                 player_picks_by_player[pid] = []
             player_picks_by_player[pid].append((p_week, p_pick, p_ats))
 
-    # --- Pre-fetch League Memberships ---
+    # --- Pre-fetch League Memberships (Current Year Only) ---
     leagues_meta = {}          # league_id (int) -> league_name
     league_members_set = {}    # league_id (int) -> set(player_ids as int)
     player_leagues_map = {}    # player_id (int) -> list of (league_id, league_name)
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT league_id, league_name FROM Leagues")
-            for raw_lid, lname in cur.fetchall():
-                lid = int(raw_lid)
-                leagues_meta[lid] = lname
-                league_members_set[lid] = set()
+    if not is_past_year:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT league_id, league_name FROM Leagues")
+                for raw_lid, lname in cur.fetchall():
+                    lid = int(raw_lid)
+                    leagues_meta[lid] = lname
+                    league_members_set[lid] = set()
 
-            cur.execute("SELECT league_id, player_id FROM League_Members")
-            for raw_lid, raw_pid in cur.fetchall():
-                lid = int(raw_lid)
-                pid = int(raw_pid)
+                cur.execute("SELECT league_id, player_id FROM League_Members")
+                for raw_lid, raw_pid in cur.fetchall():
+                    lid = int(raw_lid)
+                    pid = int(raw_pid)
 
-                if lid in league_members_set:
-                    league_members_set[lid].add(pid)
+                    if lid in league_members_set:
+                        league_members_set[lid].add(pid)
 
-                if lid != 1:  # Exclude Main Event league (ID 1)
-                    if pid not in player_leagues_map:
-                        player_leagues_map[pid] = []
-                    lname = leagues_meta.get(lid, f"League {lid}")
-                    player_leagues_map[pid].append((lid, lname))
-    except Exception as e:
-        logger.warning("Could not pre-fetch league tables: %s", str(e))
+                    if lid != 1:  # Exclude Main Event league (ID 1)
+                        if pid not in player_leagues_map:
+                            player_leagues_map[pid] = []
+                        lname = leagues_meta.get(lid, f"League {lid}")
+                        player_leagues_map[pid].append((lid, lname))
+        except Exception as e:
+            logger.warning("Could not pre-fetch league tables: %s", str(e))
+    else:
+        logger.info("Past year {} detected. Skipping sub-league membership lookup and output.", year)
 
     # --- Calculate Weekly Trends ---
     field_wins = 0
@@ -795,16 +798,17 @@ def lambda_handler(event, context):
             )
         message += "</table><br>\n"
 
-        # Build sub-league standings if the player belongs to any
+        # Build sub-league standings only if target year is the current year
         league_standings_html = ""
-        player_leagues = player_leagues_map.get(int(player_id), [])
-        for lid, lname in player_leagues:
-            members_in_league = league_members_set.get(lid, set())
-            sub_league_standings = [row for row in standings if int(row[0]) in members_in_league]
-            if sub_league_standings:
-                league_standings_html += get_league_standings_html(
-                    standings_week, lname, sub_league_standings, player_id, picks_map
-                )
+        if not is_past_year:
+            player_leagues = player_leagues_map.get(int(player_id), [])
+            for lid, lname in player_leagues:
+                members_in_league = league_members_set.get(lid, set())
+                sub_league_standings = [row for row in standings if int(row[0]) in members_in_league]
+                if sub_league_standings:
+                    league_standings_html += get_league_standings_html(
+                        standings_week, lname, sub_league_standings, player_id, picks_map
+                    )
 
         main_standings_html = get_standings_html(standings_week, standings, player_id, picks_map)
         mail_body = build_standings_email_head() + "\n" + message + league_standings_html + main_standings_html
