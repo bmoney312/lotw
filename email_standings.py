@@ -557,7 +557,7 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.warning("Could not pre-fetch league tables: %s", str(e))
     else:
-        logger.info("Past year {} detected. Skipping sub-league membership lookup and output.", year)
+        logger.info("Past year {} detected. Skipping sub-league membership lookup and output.".format(year))
 
     # --- Calculate Weekly Trends ---
     field_wins = 0
