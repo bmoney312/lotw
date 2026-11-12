@@ -27,6 +27,7 @@ import process_pick
 import email_picks
 import email_standings
 import update_standings
+import update_weekly_results
 import emit_lotw_metrics
 import email_registration
 import process_registration
@@ -514,3 +515,164 @@ class TestWeeklyDistributions(unittest.TestCase):
         mock_smtp_send.assert_called_once()
         mock_cloudwatch.put_metric_data.assert_called_once()
         mock_create_token.assert_not_called()  # Verified: existing token used, no new token minted
+
+
+class TestWeeklyResults(unittest.TestCase):
+
+    @patch('update_weekly_results.get_db_connection')
+    @patch('update_weekly_results.update_database_scores')
+    @patch('update_weekly_results.update_game_ats')
+    @patch('update_weekly_results.update_pick_ats')
+    @patch('update_weekly_results.update_standings_table')
+    def test_update_weekly_results_commit_flow(
+        self,
+        mock_update_standings,
+        mock_update_pick_ats,
+        mock_update_game_ats,
+        mock_update_scores,
+        mock_db_conn
+    ):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+        mock_update_scores.return_value = {
+            "updated": 1,
+            "skipped": 0,
+            "details": ["DET 27 @ GNB 24 (Prev: None-None)"]
+        }
+        mock_update_game_ats.return_value = (True, "Success")
+        mock_update_pick_ats.return_value = (True, "Success")
+
+        event = {
+            "detail-type": "Scheduled Event"
+        }
+
+        response = update_weekly_results.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn("Status: COMMITTED", response['body'])
+        self.assertIn("Games Updated: 1", response['body'])
+        self.assertIn("Standings for week 1 updated successfully.", response['body'])
+        mock_update_scores.assert_called_once()
+        mock_update_game_ats.assert_called_once_with(mock_conn, 1)
+        mock_update_pick_ats.assert_called_once_with(mock_conn, 1)
+        mock_update_standings.assert_called_once()
+        mock_conn.close.assert_called_once()
+
+    @patch('update_weekly_results.get_db_connection')
+    @patch('update_weekly_results.update_database_scores')
+    @patch('update_weekly_results.update_game_ats')
+    @patch('update_weekly_results.update_pick_ats')
+    @patch('update_weekly_results.update_standings_table')
+    def test_update_weekly_results_dry_run_skips_ats_and_standings(
+        self,
+        mock_update_standings,
+        mock_update_pick_ats,
+        mock_update_game_ats,
+        mock_update_scores,
+        mock_db_conn
+    ):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+        mock_update_scores.return_value = {
+            "updated": 2,
+            "skipped": 14,
+            "details": ["SEA 24 @ DEN 17 (Prev: None-None)"]
+        }
+
+        event = {
+            "detail-type": "manual_run",
+            "queryStringParameters": {"mode": "dry_run", "week": "1"}
+        }
+
+        response = update_weekly_results.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn("Status: DRY-RUN (Simulated)", response['body'])
+        self.assertIn("Games Would Update: 2", response['body'])
+        mock_update_scores.assert_called_once_with(mock_conn, unittest.mock.ANY, 1, False)
+        mock_update_game_ats.assert_not_called()
+        mock_update_pick_ats.assert_not_called()
+        mock_update_standings.assert_not_called()
+        mock_conn.close.assert_called_once()
+
+    @patch('update_weekly_results.get_db_connection')
+    @patch('update_weekly_results.update_database_scores')
+    @patch('update_weekly_results.update_game_ats')
+    @patch('update_weekly_results.update_pick_ats')
+    @patch('update_weekly_results.update_standings_table')
+    def test_update_weekly_results_aborts_on_incomplete_game_ats(
+        self,
+        mock_update_standings,
+        mock_update_pick_ats,
+        mock_update_game_ats,
+        mock_update_scores,
+        mock_db_conn
+    ):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+        mock_update_scores.return_value = {"updated": 0, "skipped": 1, "details": []}
+        mock_update_game_ats.return_value = (False, "NULL value for away team score for game 14")
+
+        event = {
+            "detail-type": "manual_run"
+        }
+
+        response = update_weekly_results.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn("Update of game ATS failed for week 1", response['body'])
+        mock_update_pick_ats.assert_not_called()
+        mock_update_standings.assert_not_called()
+        mock_conn.close.assert_called_once()
+
+    @patch('update_weekly_results.get_db_connection')
+    @patch('update_weekly_results.update_database_scores')
+    @patch('update_weekly_results.update_game_ats')
+    @patch('update_weekly_results.update_pick_ats')
+    @patch('update_weekly_results.update_standings_table')
+    def test_update_weekly_results_past_year_backfill(
+        self,
+        mock_update_standings,
+        mock_update_pick_ats,
+        mock_update_game_ats,
+        mock_update_scores,
+        mock_db_conn
+    ):
+        mock_conn = MagicMock()
+        mock_db_conn.return_value = mock_conn
+
+        event = {
+            "detail-type": "manual_run",
+            "queryStringParameters": {"year": "2024"}
+        }
+
+        response = update_weekly_results.lambda_handler(event, {})
+
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn("Season: 2024 | Week: 22", response['body'])
+        mock_update_scores.assert_not_called()
+        mock_update_game_ats.assert_not_called()
+        mock_update_pick_ats.assert_not_called()
+        mock_update_standings.assert_called_once_with(mock_conn, 22, 2024)
+
+    @patch('update_weekly_results.urllib.request.urlopen')
+    def test_fetch_scores_from_nflverse_maps_teams(self, mock_urlopen):
+        sample_csv = (
+            "season,week,away_team,home_team,away_score,home_score\n"
+            "2026,1,DET,GB,31,24\n"
+            "2026,1,LA,KC,17,20\n"
+            "2026,2,SEA,SF,14,10\n"
+        ).encode('utf-8')
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = sample_csv
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        scores = update_weekly_results.fetch_scores_from_nflverse(2026, 1)
+
+        self.assertEqual(scores['DET'], 31)
+        self.assertEqual(scores['GNB'], 24)
+        self.assertEqual(scores['LAR'], 17)
+        self.assertEqual(scores['KAN'], 20)
+        self.assertNotIn('SEA', scores)  # Week 2 excluded
+

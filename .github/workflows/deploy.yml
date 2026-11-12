@@ -39,6 +39,7 @@ env:
     update_standings
     update_game_scores
     update_player
+    update_weekly_results
 
 jobs:
   test:
