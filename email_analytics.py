@@ -316,6 +316,34 @@ def get_all_career_standings(conn, start_year, end_year, picks_cache, games_cach
     return career_standings
 
 
+def get_all_career_wins_standings(conn, start_year, end_year, picks_cache, games_cache):
+    """
+    Aggregate career wins for ALL active players (registered for end_year) since start_year.
+    Returns list of tuples sorted by Wins desc, then Win% desc:
+    (Player ID, Player Name, Wins, Losses, Win%)
+    """
+    with conn.cursor() as cur:
+        sql = "SELECT player_id, first_name, last_name, past_titles, rookie FROM Players WHERE `{}_registration` = 1".format(end_year)
+        cur.execute(sql)
+        players = cur.fetchall()
+
+    career_wins_standings = []
+
+    for player in players:
+        p_id, fname, lname, past_titles, rookie = player
+        w, l, f, d, p = get_player_career_stats(p_id, start_year, end_year, picks_cache, games_cache)
+
+        total = w + l
+        if total > 0:
+            pct = w / total
+            full_name = get_standings_full_name(fname, lname, past_titles, rookie)
+            career_wins_standings.append((p_id, full_name, w, l, pct))
+
+    # Sort by Wins desc (index 2), then Win % desc (index 4)
+    career_wins_standings.sort(key=lambda x: (x[2], x[4]), reverse=True)
+    return career_wins_standings
+
+
 # --- HTML Builders ---
 
 def build_analytics_html(
@@ -327,6 +355,7 @@ def build_analytics_html(
     career_wins, career_losses, career_fav, career_dog, career_pickem,
     team_ats_records,
     all_career_standings,
+    all_career_wins_standings,
     yearly_history,
     current_player_id,
     start_year=ANALYTICS_START_YEAR
@@ -406,7 +435,7 @@ def build_analytics_html(
 
     html += "</table><br><br>"
 
-    # 4. All Players Career Records
+    # 4. All Players Career Win Percentage
     html += "<h3>LOTW: Top 50 Career Win Percentage (since {})</h3>".format(start_year)
     html += "<p><b>Active players. Minimum two seasons. NO PICKs counted as losses.</b></p>"
     html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
@@ -433,6 +462,35 @@ def build_analytics_html(
             )
         c_rank += 1
         prev_player_win_percentage = p[4]*100
+    html += "</table><br><br>"
+
+    # 5. All Players Career Wins
+    html += "<h3>LOTW: Top 50 Career Wins (since {})</h3>".format(start_year)
+    html += "<p><b>Active players. NO PICKs counted as losses.</b></p>"
+    html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
+
+    w_rank = 1
+    prev_player_wins = 0
+    for p in all_career_wins_standings:
+        # p structure: (id, name, wins, losses, pct)
+        p_id_loop = p[0]
+        p_name = p[1]
+
+        # only report top 50 (include ties at rank 50)
+        if (w_rank > 50) and (prev_player_wins > p[2]):
+            break
+
+        # Bold name if it matches current player
+        if p_id_loop == current_player_id:
+            html += "<tr><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{:.1f}%</b></td></tr>".format(
+                w_rank, p_name, p[2], p[3], p[4]*100
+            )
+        else:
+            html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(
+                w_rank, p_name, p[2], p[3], p[4]*100
+            )
+        w_rank += 1
+        prev_player_wins = p[2]
     html += "</table><br><br>"
 
     html += "</body></html>"
@@ -569,7 +627,10 @@ def lambda_handler(event, context):
     # 2. All Players Career Standings (start_year to Current)
     all_career_standings = get_all_career_standings(conn, ANALYTICS_START_YEAR, current_year, picks_cache, games_cache)
 
-    # 3. Current Year Standings (to get rank)
+    # 3. All Players Career Wins Standings (start_year to Current)
+    all_career_wins_standings = get_all_career_wins_standings(conn, ANALYTICS_START_YEAR, current_year, picks_cache, games_cache)
+
+    # 4. Current Year Standings (to get rank)
     current_standings = get_standings(conn)  # List of tuples, need to parse to find rank
     total_players_season = len(current_standings)
 
@@ -622,6 +683,7 @@ def lambda_handler(event, context):
             c_wins, c_losses, c_fav, c_dog, c_pickem,
             team_ats_records,
             all_career_standings,
+            all_career_wins_standings,
             yearly_history,
             p_id,
             start_year=ANALYTICS_START_YEAR
