@@ -436,7 +436,7 @@ def build_analytics_html(
     html += "</table><br><br>"
 
     # 4. All Players Career Win Percentage
-    html += "<h3>LOTW: Top 50 Career Win Percentage (since {})</h3>".format(start_year)
+    html += "<h3>LOTW: Career Win Percentage - Top 50 (since {})</h3>".format(start_year)
     html += "<p><b>Active players. Minimum two seasons. NO PICKs counted as losses.</b></p>"
     html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
 
@@ -465,7 +465,7 @@ def build_analytics_html(
     html += "</table><br><br>"
 
     # 5. All Players Career Wins
-    html += "<h3>LOTW: Top 50 Career Wins (since {})</h3>".format(start_year)
+    html += "<h3>LOTW: Career Wins - Top 50 (since {})</h3>".format(start_year)
     html += "<p><b>Active players. NO PICKs counted as losses.</b></p>"
     html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
 
