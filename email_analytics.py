@@ -110,13 +110,14 @@ def get_player_yearly_history(player_id, start_year, end_year, picks_cache):
 
 def get_player_career_stats(player_id, start_year, end_year, picks_cache, games_cache):
     """
-    Aggregate wins, losses, fav counts, dog counts from start_year to end_year using cache.
+    Aggregate wins, losses, fav counts, dog counts, and seasons played from start_year to end_year using cache.
     """
     total_wins = 0
     total_losses = 0
     total_fav = 0
     total_dog = 0
     total_pickem = 0
+    seasons_played = 0
 
     current_year_val = get_current_year()
 
@@ -151,6 +152,8 @@ def get_player_career_stats(player_id, start_year, end_year, picks_cache, games_
 
         # if player has any picks this year
         if len(rows) > 0:
+            seasons_played += 1
+
             # Adjust record for missing weeks
             if year < current_year_val:
                 if year <= 2020:
@@ -166,7 +169,7 @@ def get_player_career_stats(player_id, start_year, end_year, picks_cache, games_
             total_wins += year_wins
             total_losses += year_losses
 
-    return total_wins, total_losses, total_fav, total_dog, total_pickem
+    return total_wins, total_losses, total_fav, total_dog, total_pickem, seasons_played
 
 
 def get_player_season_details_cached(player_id, current_year, picks_cache, games_cache):
@@ -297,7 +300,7 @@ def get_all_career_standings(conn, start_year, end_year, picks_cache, games_cach
     for player in players:
         # UPDATED: Unpack new columns
         p_id, fname, lname, past_titles, rookie = player
-        w, l, f, d, p = get_player_career_stats(p_id, start_year, end_year, picks_cache, games_cache)
+        w, l, f, d, p, _ = get_player_career_stats(p_id, start_year, end_year, picks_cache, games_cache)
 
         total = w + l
         # Filter: Omit players with fewer than 42 career picks (two seasons)
@@ -320,7 +323,7 @@ def get_all_career_wins_standings(conn, start_year, end_year, picks_cache, games
     """
     Aggregate career wins for ALL active players (registered for end_year) since start_year.
     Returns list of tuples sorted by Wins desc, then Win% desc:
-    (Player ID, Player Name, Wins, Losses, Win%)
+    (Player ID, Player Name, Wins, Losses, Win%, Seasons, Wins Per Season)
     """
     with conn.cursor() as cur:
         sql = "SELECT player_id, first_name, last_name, past_titles, rookie FROM Players WHERE `{}_registration` = 1".format(end_year)
@@ -331,13 +334,14 @@ def get_all_career_wins_standings(conn, start_year, end_year, picks_cache, games
 
     for player in players:
         p_id, fname, lname, past_titles, rookie = player
-        w, l, f, d, p = get_player_career_stats(p_id, start_year, end_year, picks_cache, games_cache)
+        w, l, f, d, p, seasons = get_player_career_stats(p_id, start_year, end_year, picks_cache, games_cache)
 
         total = w + l
         if total > 0:
             pct = w / total
+            wins_per_season = (w / seasons) if seasons > 0 else 0.0
             full_name = get_standings_full_name(fname, lname, past_titles, rookie)
-            career_wins_standings.append((p_id, full_name, w, l, pct))
+            career_wins_standings.append((p_id, full_name, w, l, pct, seasons, wins_per_season))
 
     # Sort by Wins desc (index 2), then Win % desc (index 4)
     career_wins_standings.sort(key=lambda x: (x[2], x[4]), reverse=True)
@@ -467,12 +471,12 @@ def build_analytics_html(
     # 5. All Players Career Wins
     html += "<h3>LOTW: Career Wins - Top 50 (since {})</h3>".format(start_year)
     html += "<p><b>Active players. NO PICKs counted as losses.</b></p>"
-    html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th></tr>"
+    html += "<table><tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th><th>Win %</th><th>Seasons</th><th>Wins Per Season</th></tr>"
 
     w_rank = 1
     prev_player_wins = 0
     for p in all_career_wins_standings:
-        # p structure: (id, name, wins, losses, pct)
+        # p structure: (id, name, wins, losses, pct, seasons, wins_per_season)
         p_id_loop = p[0]
         p_name = p[1]
 
@@ -482,12 +486,12 @@ def build_analytics_html(
 
         # Bold name if it matches current player
         if p_id_loop == current_player_id:
-            html += "<tr><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{:.1f}%</b></td></tr>".format(
-                w_rank, p_name, p[2], p[3], p[4]*100
+            html += "<tr><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{}</b></td><td><b>{:.1f}%</b></td><td><b>{}</b></td><td><b>{:.1f}</b></td></tr>".format(
+                w_rank, p_name, p[2], p[3], p[4]*100, p[5], p[6]
             )
         else:
-            html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td></tr>".format(
-                w_rank, p_name, p[2], p[3], p[4]*100
+            html += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.1f}%</td><td>{}</td><td>{:.1f}</td></tr>".format(
+                w_rank, p_name, p[2], p[3], p[4]*100, p[5], p[6]
             )
         w_rank += 1
         prev_player_wins = p[2]
@@ -671,7 +675,7 @@ def lambda_handler(event, context):
 
         # 2. Get Career Stats (Player specific)
         logger.info("Generating career stats for {} {} ({})".format(first, last, p_id))
-        c_wins, c_losses, c_fav, c_dog, c_pickem = get_player_career_stats(p_id, ANALYTICS_START_YEAR, current_year, picks_cache, games_cache)
+        c_wins, c_losses, c_fav, c_dog, c_pickem, _ = get_player_career_stats(p_id, ANALYTICS_START_YEAR, current_year, picks_cache, games_cache)
 
         # 3. Get Yearly History (New)
         yearly_history = get_player_yearly_history(p_id, ANALYTICS_START_YEAR, current_year, picks_cache)
