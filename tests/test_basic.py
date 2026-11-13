@@ -417,6 +417,7 @@ class TestAnalyticsGeneration(unittest.TestCase):
     @patch('email_analytics.get_all_paid_players')
     @patch('email_analytics.build_analytics_cache')
     @patch('email_analytics.get_team_ats_records')
+    @patch('email_analytics.get_past_champions')
     @patch('email_analytics.get_all_career_standings')
     @patch('email_analytics.get_all_career_wins_standings')
     @patch('email_analytics.get_standings')
@@ -433,6 +434,7 @@ class TestAnalyticsGeneration(unittest.TestCase):
         mock_standings,
         mock_career_wins_standings,
         mock_career_standings,
+        mock_past_champions,
         mock_team_ats,
         mock_build_cache,
         mock_get_players,
@@ -453,6 +455,7 @@ class TestAnalyticsGeneration(unittest.TestCase):
         # 3. Analytics data mocks
         mock_get_players.return_value = [(1, "p1@example.com", "Doe", "John", 0, 1)]
         mock_team_ats.return_value = [("Seahawks", 1, 0, 1.0, 1, 0, 0, 0)]
+        mock_past_champions.return_value = [(2025, 1, "John Doe", 15, 7, 0.682)]
         mock_career_standings.return_value = [(1, "Doe, John", 10, 5, 0.66)]
         mock_career_wins_standings.return_value = [(1, "Doe, John", 10, 5, 0.66, 1, 10.0)]
         mock_standings.return_value = [(1, "Doe", "John", 0, 1, 10, 5, 0.66, 15, "W2")]
