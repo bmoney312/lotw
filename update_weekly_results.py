@@ -321,10 +321,8 @@ def update_standings_table(conn, week, year):
         else:
             player_win_percentage = player_wins / week
 
-        logger.info("Computed %s Ws / %s Ls / %s ATS / %s Win%% for player %s", player_wins, player_losses, player_ats, player_win_percentage, player_id)
-
         streak_string = get_player_streak(conn, player_id, week, year)
-        logger.info("Computed streak %s for player %s", streak_string, player_id)
+        logger.debug("Computed %s Ws / %s Ls / %s ATS / %s Win%% / %s Streak for player %s", player_wins, player_losses, player_ats, player_win_percentage, streak_string, player_id)
 
         try:
             with conn.cursor() as cur:
