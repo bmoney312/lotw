@@ -17,7 +17,7 @@ logger.setLevel(logging.INFO)
 S3_BUCKET_NAME = os.environ.get('s3_bucket', 'lotw-lines-062043405251-us-west-2-an')
 s3_client = boto3.client('s3')
 
-# Map nflverse team abbreviations to LOTW database team IDs
+# Map external team abbreviations (nflverse / ESPN) to LOTW database team IDs
 NFLVERSE_TO_LOTW_TEAM_MAP = {
     'ARI': 'ARI', 'ATL': 'ATL', 'BAL': 'BAL', 'BUF': 'BUF',
     'CAR': 'CAR', 'CHI': 'CHI', 'CIN': 'CIN', 'CLE': 'CLE',
@@ -67,6 +67,75 @@ def normalize_line_to_integer(raw_home_line):
     return sign * int(abs_line)
 
 
+def fetch_espn_schedule(target_year, target_week):
+    """
+    Fetches authoritative kickoff times (UTC naive datetime) from ESPN's public scoreboard API.
+    Handles regular season (weeks 1-18 -> seasontype=2) and postseason (weeks 19-22 -> seasontype=3).
+    Returns: { (away_team_id, home_team_id): kickoff_datetime_utc }
+    """
+    week_int = int(target_week)
+    if week_int <= 18:
+        season_type = 2
+        espn_week = week_int
+    else:
+        season_type = 3
+        postseason_map = {19: 1, 20: 2, 21: 3, 22: 5}
+        espn_week = postseason_map.get(week_int, week_int - 18)
+
+    url = (
+        f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+        f"?dates={target_year}&seasontype={season_type}&week={espn_week}"
+    )
+    logger.info("Fetching authoritative schedule from ESPN: %s", url)
+
+    req = urllib.request.Request(
+        url,
+        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        logger.warning("Failed to fetch schedule from ESPN API: %s", str(e))
+        return {}
+
+    kickoff_map = {}
+    for event in data.get('events', []):
+        competitions = event.get('competitions', [])
+        if not competitions:
+            continue
+
+        comp = competitions[0]
+        raw_date = comp.get('date') or event.get('date')
+        if not raw_date:
+            continue
+
+        try:
+            dt_utc = datetime.datetime.fromisoformat(raw_date.replace('Z', '+00:00'))
+            kickoff_utc_naive = dt_utc.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        except Exception as e:
+            logger.warning("Could not parse ESPN kickoff timestamp '%s': %s", raw_date, str(e))
+            continue
+
+        away_id = None
+        home_id = None
+        for competitor in comp.get('competitors', []):
+            abbr = competitor.get('team', {}).get('abbreviation', '').strip().upper()
+            mapped_id = NFLVERSE_TO_LOTW_TEAM_MAP.get(abbr, abbr)
+            if competitor.get('homeAway') == 'home':
+                home_id = mapped_id
+            elif competitor.get('homeAway') == 'away':
+                away_id = mapped_id
+
+        if away_id and home_id:
+            kickoff_map[(away_id, home_id)] = kickoff_utc_naive
+            logger.info("Parsed ESPN schedule: %s @ %s -> Kickoff %s UTC", away_id, home_id, kickoff_utc_naive)
+
+    logger.info("ESPN schedule parsing complete for Season %s, Week %s: %d games indexed", target_year, target_week, len(kickoff_map))
+    return kickoff_map
+
+
 def parse_nflverse_kickoff(row):
     """
     Parses kickoff timestamp from nflverse row into a UTC naive datetime.
@@ -97,7 +166,7 @@ def parse_nflverse_kickoff(row):
 
 def fetch_nflverse_game_data(target_year, target_week):
     """
-    Fetches game spreads and kickoff times from the open nflverse CSV feed.
+    Fetches game spreads and backup kickoff times from the open nflverse CSV feed.
     Returns:
         spreads_map: { (away_team_id, home_team_id): home_team_line_int, home_team_id: home_team_line_int }
         kickoff_map: { (away_team_id, home_team_id): kickoff_datetime_utc }
@@ -145,7 +214,7 @@ def fetch_nflverse_game_data(target_year, target_week):
             kickoff_map[(away_id, home_id)] = actual_kickoff
             logger.info("Parsed nflverse schedule: %s @ %s -> Kickoff %s UTC", away_id, home_id, actual_kickoff)
         else:
-            logger.warning("Could not resolve kickoff time from feed for %s @ %s", away_id, home_id)
+            logger.warning("Could not resolve kickoff time from nflverse feed for %s @ %s", away_id, home_id)
 
         # Parse and record spread line
         if raw_spread:
@@ -168,12 +237,15 @@ def fetch_nflverse_game_data(target_year, target_week):
 def generate_sql_lines(conn, week, year):
     """
     Generate clean SQL UPDATE statements for the given week with spreads filled in.
-    Logs warnings on kickoff schedule mismatches and appends SQL to fix discrepancies.
+    Cross-validates kickoff times against ESPN (primary) and nflverse (fallback),
+    logging stale feed discrepancies and appending SQL to fix Games_{year} and Picks_{year}.
     """
     table_name = f"Games_{year}"
+    picks_table = f"Picks_{year}"
     logger.info("Generating SQL lines for table: %s (Week %s)", table_name, week)
 
-    spreads_map, kickoff_map = fetch_nflverse_game_data(year, week)
+    espn_kickoff_map = fetch_espn_schedule(year, week)
+    spreads_map, nflverse_kickoff_map = fetch_nflverse_game_data(year, week)
     games = get_all_games(conn, week)
 
     if not games:
@@ -197,29 +269,48 @@ def generate_sql_lines(conn, week, year):
         matchup_key = (away_team_id, home_team_id)
         logger.info("Validating Game ID %s: %s @ %s", game_id, away_team_id, home_team_id)
 
-        # Verify kickoff schedule against actual NFL schedule
-        actual_kickoff = kickoff_map.get(matchup_key)
+        espn_kickoff = espn_kickoff_map.get(matchup_key)
+        nflverse_kickoff = nflverse_kickoff_map.get(matchup_key)
+
+        # Log diagnostic warning if nflverse has not caught up to an ESPN schedule flex
+        if espn_kickoff is not None and nflverse_kickoff is not None:
+            if abs((espn_kickoff - nflverse_kickoff).total_seconds()) > 60:
+                logger.warning(
+                    "FEED DISCREPANCY: %s @ %s (Week %s) — ESPN has %s UTC, but nflverse still reports %s UTC (using ESPN).",
+                    away_team_id, home_team_id, week, espn_kickoff, nflverse_kickoff
+                )
+
+        # Prefer ESPN live schedule over nflverse static CSV
+        actual_kickoff = espn_kickoff or nflverse_kickoff
+        schedule_source = "ESPN" if espn_kickoff is not None else ("nflverse" if nflverse_kickoff is not None else None)
+
+        # Verify kickoff schedule against authoritative NFL schedule
         if actual_kickoff is not None and db_kickoff is not None:
             time_delta = abs((db_kickoff - actual_kickoff).total_seconds())
             if time_delta > 60:
                 actual_kickoff_str = actual_kickoff.strftime("%Y-%m-%d %H:%M:%S")
                 logger.warning(
-                    "SCHEDULE WARNING: Game ID %s (%s @ %s) kickoff mismatch! "
-                    "DB has %s UTC, but actual schedule is %s UTC (flexed/rescheduled).",
-                    game_id, away_team_id, home_team_id, db_kickoff, actual_kickoff
+                    "SCHEDULE WARNING [%s]: Game ID %s (%s @ %s) kickoff mismatch! "
+                    "DB has %s UTC, but %s reports %s UTC (flexed/rescheduled).",
+                    schedule_source, game_id, away_team_id, home_team_id, db_kickoff, schedule_source, actual_kickoff
                 )
-                fix_sql = (
+                fix_game_sql = (
                     f"UPDATE {table_name} SET kickoff_time = '{actual_kickoff_str}' "
                     f"WHERE game_id = {game_id} AND away_team_id = '{away_team_id}' AND home_team_id = '{home_team_id}';"
                 )
-                schedule_fix_statements.append(fix_sql)
+                fix_picks_sql = (
+                    f"UPDATE {picks_table} SET lock_in_time = '{actual_kickoff_str}' "
+                    f"WHERE week = {week} AND lock_in_time IS NOT NULL AND pick IN ('{away_team_id}', '{home_team_id}');"
+                )
+                schedule_fix_statements.append(fix_game_sql)
+                schedule_fix_statements.append(fix_picks_sql)
             else:
                 logger.info(
-                    "Kickoff time check PASSED for %s @ %s (LOTW DB: %s UTC, NFL schedule: %s UTC)",
-                    away_team_id, home_team_id, db_kickoff, actual_kickoff
+                    "Kickoff time check PASSED [%s] for %s @ %s (LOTW DB: %s UTC, %s schedule: %s UTC)",
+                    schedule_source, away_team_id, home_team_id, db_kickoff, schedule_source, actual_kickoff
                 )
         elif actual_kickoff is None:
-            logger.warning("No schedule kickoff found in nflverse feed for %s @ %s to compare against DB", away_team_id, home_team_id)
+            logger.warning("No schedule kickoff found in ESPN or nflverse feeds for %s @ %s to compare against DB", away_team_id, home_team_id)
         elif db_kickoff is None:
             logger.warning("Database has NULL kickoff_time for game_id %s (%s @ %s)", game_id, away_team_id, home_team_id)
 
@@ -246,12 +337,12 @@ def generate_sql_lines(conn, week, year):
             "Appending %d schedule fix statement(s) to output for week %s.",
             len(schedule_fix_statements), week
         )
-        sql_statements.append("\n-- Schedule Mismatch Fix Statements (Flexed/Rescheduled Games):")
+        sql_statements.append("\n-- Schedule Mismatch Fix Statements (Flexed/Rescheduled Games & Active Picks):")
         sql_statements.extend(schedule_fix_statements)
 
     logger.info(
         "SQL generation summary for week %s: %d games processed (%d lines assigned, %d lines missing, %d schedule fixes)",
-        week, len(games), lines_found_count, lines_missing_count, len(schedule_fix_statements)
+        week, len(games), lines_found_count, lines_missing_count, len(schedule_fix_statements) // 2
     )
 
     return "\n".join(sql_statements) + "\n"
