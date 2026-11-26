@@ -372,7 +372,6 @@ def lambda_handler(event, context):
     raw_time = datetime.datetime.now()
     adjusted_minute = raw_time.minute - (raw_time.minute % 5)
     time_now = raw_time.replace(minute=adjusted_minute, second=0, microsecond=0)
-    time_now = raw_time.replace(minute=0, second=0, microsecond=0)
 
     # set pick deadline to current time
     pick_deadline = time_now
